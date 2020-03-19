@@ -1,0 +1,253 @@
+﻿namespace Server
+{
+    using Core;
+
+    using System;
+    using System.Collections.Generic;
+    using System.Diagnostics;
+    using System.Net;
+    using System.Net.Sockets;
+    using System.Reflection;
+    using System.Text;
+    using System.Text.Json;
+    using System.Text.Json.Serialization;
+    using System.Threading;
+    using System.Threading.Tasks;
+
+    public class ObjectBoolConverter : JsonConverter<object>
+    {
+        public override object Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options)
+        {
+            if (reader.TokenType == JsonTokenType.True)
+            {
+                return true;
+            }
+
+            if (reader.TokenType == JsonTokenType.False)
+            {
+                return false;
+            }
+
+            // Forward to the JsonElement converter
+            if (options.GetConverter(typeof(JsonElement)) is JsonConverter<JsonElement> converter)
+            {
+                return converter.Read(ref reader, type, options);
+            }
+
+            throw new JsonException();
+
+            // or for best performance, copy-paste the code from that converter:
+            //using (JsonDocument document = JsonDocument.ParseValue(ref reader))
+            //{
+            //    return document.RootElement.Clone();
+            //}
+        }
+
+        public override void Write(Utf8JsonWriter writer, object value, JsonSerializerOptions options)
+        {
+            throw new InvalidOperationException("Directly writing object not supported");
+        }
+    }
+
+    public class Server
+    {
+        public static void Main()
+        {
+            Console.Title = "Server";
+            Console.WriteLine("Server");
+
+            IPAddress iPAddress = IPAddress.Parse("127.0.0.1");
+            const int port = 5500;
+
+            ISerializer serializer = new Json_Serializer();
+
+            List<TcpClient> clients = new List<TcpClient>();
+
+            IPEndPoint ipEndPoint = new IPEndPoint(iPAddress, port);
+
+            TcpListener server = new TcpListener(ipEndPoint);
+
+            Console.WriteLine("Initializing server");
+
+            server.Start();
+
+            Console.WriteLine("Waiting for connections");
+
+            Dictionary<string, object> controllers = new Dictionary<string, object>()
+            {
+                { nameof(Controller), new Controller() }
+            };
+
+            Task.Run(() =>
+            {
+                while (true)
+                {
+
+                    string[] command = Console.ReadLine().Split(' ');
+
+                    if (command[0].ToLower() == "send")
+                    {
+                        string message = command[1];
+
+                        clients.ForEach(client =>
+                        client.Client.Send(serializer.Serialize(message)));
+
+                        Console.WriteLine($"Send {message} to every client");
+                    }
+                    else if (command[0].ToUpper() == "CALL")
+                    {
+                        string message = command[1];
+
+                        clients.ForEach(client =>
+                        client.Client.Send(serializer.Serialize(message)));
+                    };
+
+                };
+            });
+
+
+            Task.Run(() =>
+            {
+                while (true)
+                {
+                    TcpClient client = server.AcceptTcpClient();
+
+                    clients.Add(client);
+
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine($"Client connected {client.Client.RemoteEndPoint}");
+                    Console.ResetColor();
+
+                    Console.Title = $"Clients: {clients.Count}";
+
+                    Task.Run(() =>
+                    {
+                        byte[] buffer = new byte[1024];
+
+                        while (true)
+                        {
+                            List<byte> completeRequest = new List<byte>();
+
+                            int bytes = client.Client.Receive(buffer);
+
+                            if (bytes == 0)
+                            {
+                                Console.ForegroundColor = ConsoleColor.Yellow;
+                                Console.WriteLine("Client disconnected");
+                                Console.ResetColor();
+
+                                clients.Remove(client);
+
+                                Console.Title = $"Clients: {clients.Count}";
+                                return;
+                            };
+
+                            for (int a = 0; a < bytes; a++)
+                            {
+                                completeRequest.Add(buffer[a]);
+                            };
+
+
+                            NetworkStream networkStream = client.GetStream();
+
+                            while (networkStream.DataAvailable == true)
+                            {
+                                int readBytes = networkStream.Read(buffer, 0, buffer.Length);
+
+                                for (int a = 0; a < readBytes; a++)
+                                {
+                                    completeRequest.Add(buffer[a]);
+                                };
+                            };
+
+
+                            NetworkMessage request = serializer.Deserialize<NetworkMessage>(completeRequest.ToArray());
+
+
+                            string controllerName = request.PathSegments[0];
+                            string actionName = request.PathSegments[1];
+
+                            controllers.TryGetValue(controllerName, out object controller);
+
+                            if (controllerName is null)
+                            {
+                                client.Client.Send(serializer.Serialize($"Request failed. \nNo such controller: {controllerName}"));
+                                continue;
+                            };
+
+                            bool requestHasArguments = request.Message != null ? true : false;
+
+                            Type controllerType = controller.GetType();
+                            var controllerActions = controllerType.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.InvokeMethod);
+
+
+                            if (requestHasArguments == true)
+                            {
+                                var objType = Type.GetType(request.MessageTypeName);
+
+                                var obj = serializer.Deserialize(request.Message, objType);
+
+
+                                foreach (var action in controllerActions)
+                                {
+                                    var actionParams = action.GetParameters();
+                                    bool actionHasParams = actionParams.Length > 0 ? true : false;
+
+                                    if (actionHasParams == false)
+                                        continue;
+
+                                    if (action.Name == actionName)
+                                    {
+                                        var s1 = actionParams[0].ParameterType;
+                                        var s2 = obj.GetType();
+
+                                        if (s1 == s2)
+                                        {
+                                            action.Invoke(controller, new[] { obj });
+                                        }
+                                    };
+                                };
+                            }
+                            else
+                            {
+                                foreach (var action in controllerActions)
+                                {
+                                    bool actionHasParams = action.GetParameters().Length > 1 ? true : false;
+
+                                    if (actionHasParams == true)
+                                        continue;
+
+                                    if (action.Name == actionName)
+                                    {
+
+                                    };
+                                };
+                            } 
+                        };
+                    });
+                };
+            });
+
+            while (true)
+                Thread.Sleep(1000);
+        }
+
+
+        private class Controller
+        {
+
+            public void Action()
+            {
+                Debugger.Break();
+
+            }
+
+            public void Action2(TestClass s)
+            {
+                Debugger.Break();
+            }
+
+        }
+
+    };
+};
