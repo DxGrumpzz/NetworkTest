@@ -4,50 +4,12 @@
 
     using System;
     using System.Collections.Generic;
-    using System.Diagnostics;
+    using System.Linq;
     using System.Net;
     using System.Net.Sockets;
     using System.Reflection;
-    using System.Text;
-    using System.Text.Json;
-    using System.Text.Json.Serialization;
     using System.Threading;
     using System.Threading.Tasks;
-
-    public class ObjectBoolConverter : JsonConverter<object>
-    {
-        public override object Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options)
-        {
-            if (reader.TokenType == JsonTokenType.True)
-            {
-                return true;
-            }
-
-            if (reader.TokenType == JsonTokenType.False)
-            {
-                return false;
-            }
-
-            // Forward to the JsonElement converter
-            if (options.GetConverter(typeof(JsonElement)) is JsonConverter<JsonElement> converter)
-            {
-                return converter.Read(ref reader, type, options);
-            }
-
-            throw new JsonException();
-
-            // or for best performance, copy-paste the code from that converter:
-            //using (JsonDocument document = JsonDocument.ParseValue(ref reader))
-            //{
-            //    return document.RootElement.Clone();
-            //}
-        }
-
-        public override void Write(Utf8JsonWriter writer, object value, JsonSerializerOptions options)
-        {
-            throw new InvalidOperationException("Directly writing object not supported");
-        }
-    }
 
     public class Server
     {
@@ -178,8 +140,10 @@
                             bool requestHasArguments = request.Message != null ? true : false;
 
                             Type controllerType = controller.GetType();
-                            var controllerActions = controllerType.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.InvokeMethod);
 
+                            var controllerActions = controllerType.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.InvokeMethod)
+                            .Where(action => action.ReturnType == typeof(ActionResult) ||
+                                             action.ReturnType.BaseType == typeof(ActionResult));
 
                             if (requestHasArguments == true)
                             {
@@ -199,27 +163,39 @@
                                     if (action.Name == actionName)
                                     {
                                         var s1 = actionParams[0].ParameterType;
-                                        var s2 = obj.GetType();
 
-                                        if (s1 == s2)
+                                        if (objType == s1)
                                         {
-                                            action.Invoke(controller, new[] { obj });
+                                            ActionResult actionResult = (ActionResult)action.Invoke(controller, new[] { obj });
+
+                                            client.Client.Send(serializer.Serialize(new NetworkMessage()
+                                            {
+                                                Message = serializer.Serialize(actionResult.Result),
+                                            }));
                                         }
                                     };
                                 };
                             }
                             else
                             {
+                                var objType = Type.GetType(request.MessageTypeName);
+
                                 foreach (var action in controllerActions)
                                 {
-                                    bool actionHasParams = action.GetParameters().Length > 1 ? true : false;
+                                    var actionParams = action.GetParameters();
+                                    bool actionHasParams = actionParams.Length > 0 ? true : false;
 
-                                    if (actionHasParams == true)
+                                    if (actionHasParams == false)
                                         continue;
 
                                     if (action.Name == actionName)
                                     {
+                                        var s1 = actionParams[0].ParameterType;
 
+                                        if (objType == s1)
+                                        {
+                                            ActionResult actionResult = (ActionResult)action.Invoke(controller, null);
+                                        }
                                     };
                                 };
                             } 
@@ -231,23 +207,5 @@
             while (true)
                 Thread.Sleep(1000);
         }
-
-
-        private class Controller
-        {
-
-            public void Action()
-            {
-                Debugger.Break();
-
-            }
-
-            public void Action2(TestClass s)
-            {
-                Debugger.Break();
-            }
-
-        }
-
     };
 };

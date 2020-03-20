@@ -34,6 +34,8 @@
 
         public static void Main()
         {
+            #region MyRegion
+
             /*
             {
                 var jsonOptions = new JsonSerializerOptions();
@@ -207,8 +209,9 @@
             };
             */
 
+            #endregion
 
-            Console.WriteLine("Press enter to connet");
+            Console.WriteLine("Press enter to connec");
             Console.ReadLine();
 
             IPAddress iPAddress = IPAddress.Parse("127.0.0.1");
@@ -216,12 +219,9 @@
 
             IPEndPoint ipEndPoint = new IPEndPoint(iPAddress, port);
 
-            TestTcpClient t = new TestTcpClient(ipEndPoint, new Json_Serializer());
+            TestTcpClient client = new TestTcpClient(ipEndPoint, new Json_Serializer());
 
-            t.InitializeConnection();
-
-
-            t.AddReceivedEvent("Event1", () =>
+            client.AddReceivedEvent("Event1", () =>
             {
                 Console.WriteLine("Event1 was called");
             })
@@ -230,20 +230,24 @@
                 Console.WriteLine("Event2 was called");
             });
 
+            client.InitializeConnection();
+
 
             while (true)
             {
                 Console.WriteLine("Press enter to send");
                 Console.ReadLine();
 
-                string s = t.Send<TestClass, string>("Controller/Action2",
+                string s = client.Send<TestClass, string>("Controller/Action2",
                     new TestClass()
                     {
                         Text = "asdasfdfads",
                         Number = int.MaxValue,
                         Bool = true,
-                        Enumerable = new[] { 1, 2, 4, 8, 16}
+                        Enumerable = new[] { 1, 2, 4, 8, 16 }
                     });
+
+                Console.WriteLine($"Received {s}");
             };
 
         }
@@ -285,7 +289,7 @@
                 };
             }
 
-
+            /*
             public TReturn Send<T, TReturn>(string path, T obj)
             {
                 byte[] buffer = new byte[1024];
@@ -323,12 +327,46 @@
 
                 return data;
             }
+            */
 
+
+            public TReturn Send<T, TReturn>(string path, T obj)
+            {
+                _handleReceivedEvents = false;
+
+                _client.Client.Send(_serializer.Serialize(new NetworkMessage()
+                {
+                    Path = path,
+                    Message = _serializer.Serialize(obj),
+                    MessageTypeName = typeof(T).AssemblyQualifiedName,
+                }));
+
+                var data = WaitForMessage<TReturn>();
+
+                _handleReceivedEvents = true;
+
+                return data;
+            }
 
             public void InitializeConnection()
             {
                 _client.Connect(_endPoint);
 
+                InitializeEventHandler();
+            }
+
+            public TestTcpClient AddReceivedEvent(string eventName, Action action)
+            {
+                bool added = _receivedEvents.TryAdd(eventName, action);
+
+                if (added == false)
+                    throw new Exception($"{eventName} event already exists");
+
+                return this;
+            }
+
+            private void InitializeEventHandler()
+            {
                 Task.Run(() =>
                 {
                     while (true)
@@ -363,16 +401,31 @@
                 });
             }
 
-            public TestTcpClient AddReceivedEvent(string eventName, Action action)
+
+            private T WaitForMessage<T>()
             {
-                bool added = _receivedEvents.TryAdd(eventName, action);
+                NetworkStream networkStream = _client.GetStream();
 
-                if (added == false)
-                    throw new Exception($"{eventName} event already exists");
+                while (networkStream.DataAvailable == false)
+                    Thread.Sleep(1);
 
-                return this;
+                byte[] buffer = new byte[1024];
+                List<byte> completeRequest = new List<byte>();
+
+                while (networkStream.DataAvailable == true)
+                {
+                    int readBytes = networkStream.Read(buffer, 0, buffer.Length);
+
+                    for (int a = 0; a < readBytes; a++)
+                    {
+                        completeRequest.Add(buffer[a]);
+                    };
+                };
+
+                NetworkMessage data = _serializer.Deserialize<NetworkMessage>(completeRequest.ToArray());
+
+                return _serializer.Deserialize<T>(data.Message);
             }
-
         };
     };
 };

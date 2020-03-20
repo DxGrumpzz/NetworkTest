@@ -8,7 +8,7 @@ namespace Core
 
         public string MessageAsString => Encoding.UTF8.GetString(Message);
 
-        public string Path { get; set; }
+        public string Path { get; set; } = "";
 
         public bool HasPath => string.IsNullOrWhiteSpace(Path);
 
