@@ -168,9 +168,21 @@ namespace Client
                             };
                         };
 
-                        string evnt = _serializer.Deserialize<string>(completeRequest.ToArray());
-                        _receivedEvents.TryGetValue(evnt, out Action action);
+                    ServerEvent serverEvent = _serializer.Deserialize<ServerEvent>(completeRequest.ToArray());
+
+                    if (serverEvent.EventHasArgs == true)
+                    {
+                        var argType = Type.GetType(serverEvent.DataTypename);
+
+                        _receivedEventsArgs.TryGetValue(serverEvent.EventName, out Action<object> action);
+
+                        action?.Invoke(_serializer.Deserialize(serverEvent.Data, argType));
+                    }
+                    else
+                    {
+                        _receivedEvents.TryGetValue(serverEvent.EventName, out Action action);
                         action?.Invoke();
+                    };
 
                     };
                 });
