@@ -1,4 +1,4 @@
-namespace Server
+﻿namespace Server
 {
     using Core;
 
@@ -10,6 +10,7 @@ namespace Server
     using System.Reflection;
     using System.Threading.Tasks;
 
+
     public class TestTcpServer
     {
         private readonly IPEndPoint _ipEndPoint;
@@ -19,7 +20,7 @@ namespace Server
 
         private readonly List<TcpClient> _connectedClients = new List<TcpClient>();
 
-        private readonly Dictionary<string, object> _controllers = new Dictionary<string, object>();
+        private readonly Dictionary<string, ControllerBase> _controllers = new Dictionary<string, ControllerBase>();
 
 
         public event Action<TcpClient> ClientConnected;
@@ -42,7 +43,7 @@ namespace Server
             RunServer();
         }
 
-        public TestTcpServer AddController(object controller)
+        public TestTcpServer AddController(ControllerBase controller)
         {
             _controllers.Add(controller.GetType().Name, controller);
 
@@ -136,76 +137,68 @@ namespace Server
             });
         }
 
+
         private void HandleRequest(NetworkMessage request, TcpClient client)
         {
             string controllerName = request.PathSegments[0];
             string actionName = request.PathSegments[1];
 
-            _controllers.TryGetValue(controllerName, out object controller);
+            _controllers.TryGetValue(controllerName, out ControllerBase controller);
 
-            if (controllerName is null)
+            if (controller is null)
             {
                 client.Client.Send(_serializer.Serialize($"Request failed. \nNo such controller: {controllerName}"));
                 return;
             };
 
-            bool requestHasArguments = request.Message != null ? true : false;
 
-            Type controllerType = controller.GetType();
-
-            var controllerActions = controllerType.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.InvokeMethod)
-            .Where(action => action.ReturnType == typeof(ActionResult) ||
-                             action.ReturnType.BaseType == typeof(ActionResult));
-
-            var action = controllerActions.FirstOrDefault(action => action.Name == actionName);
-
+            var action = controller.GetAction(actionName);
 
             if (action is null)
-                {
+            {
                 client.Client.Send(_serializer.Serialize(new NetworkMessage()
-                    {
+                {
                     Message = _serializer.Serialize($"No such action: {actionName}"),
                 }));
                 return;
             };
 
-            var actionHasParameters = action.GetParameters().Count() > 0;
 
-            if (requestHasArguments == true &&
-               actionHasParameters == false)
+            if (request.RequestHasArguments == true &&
+               action.ActionHasParameters == false)
             {
-                            client.Client.Send(_serializer.Serialize(new NetworkMessage()
-                            {
+                client.Client.Send(_serializer.Serialize(new NetworkMessage()
+                {
                     Message = _serializer.Serialize($"Action {actionName} doesn't take an argument(s)"),
-                            }));
-                            return;
-                        };
-
-            if (requestHasArguments == false &&
-              actionHasParameters == true)
-                        {
-                            client.Client.Send(_serializer.Serialize(new NetworkMessage()
-                            {
-                    Message = _serializer.Serialize($"Action {actionName} missing argument(s)"),
-                            }));
-
-                            return;
-                        };
+                }));
+                return;
+            };
 
 
-
-            if (requestHasArguments == false)
+            if (request.RequestHasArguments == false &&
+              action.ActionHasParameters == true)
             {
-                        ActionResult actionResult = (ActionResult)action.Invoke(controller, null);
+                client.Client.Send(_serializer.Serialize(new NetworkMessage()
+                {
+                    Message = _serializer.Serialize($"Action {actionName} missing argument(s)"),
+                }));
 
-                        client.Client.Send(_serializer.Serialize(new NetworkMessage()
-                        {
-                            Message = _serializer.Serialize(actionResult.Data),
-                        }));
+                return;
+            };
+
+
+            if (request.RequestHasArguments == false)
+            {
+                ActionResult actionResult = action.Invoke();
+
+                client.Client.Send(_serializer.Serialize(new NetworkMessage()
+                {
+                    Message = _serializer.Serialize(actionResult.Data),
+                }));
             }
             else
             {
-                var actionParams = action.GetParameters();
+                var actionParams = action.GetParameters;
                 var actionParam = actionParams[0].ParameterType;
 
                 var objType = Type.GetType(request.MessageTypeName);
@@ -214,12 +207,12 @@ namespace Server
 
                 if (objType == actionParam)
                 {
-                    ActionResult actionResult = (ActionResult)action.Invoke(controller, new[] { obj });
+                    ActionResult actionResult = action.Invoke<object>(obj);
 
-            client.Client.Send(_serializer.Serialize(new NetworkMessage()
-            {
+                    client.Client.Send(_serializer.Serialize(new NetworkMessage()
+                    {
                         Message = _serializer.Serialize(actionResult.Data),
-            }));
+                    }));
                 };
             }
         }
@@ -237,4 +230,45 @@ namespace Server
         }
 
     };
+
+
+    public class ControllerActionInfo
+    {
+        private ControllerBase _controller;
+        
+        public MethodInfo MethodInfo { get; }
+
+        public bool ActionHasParameters => MethodInfo.GetParameters().Count() > 0;
+
+        public string ActionName => MethodInfo.Name;
+
+        public ParameterInfo[] GetParameters => MethodInfo.GetParameters();
+
+
+        public ControllerActionInfo(MethodInfo methodInfo, ControllerBase controller)
+        {
+            MethodInfo = methodInfo;
+            _controller = controller;
+        }
+
+
+
+        public ActionResult Invoke()
+        {
+            return (ActionResult)MethodInfo.Invoke(_controller, null);
+        }
+
+        public ActionResult Invoke<T>(T arg)
+        {
+            return (ActionResult)MethodInfo.Invoke(_controller, new[] { (object)arg });
+        }
+
+        public ActionResult Invoke(params object[] args)
+        {
+            return (ActionResult)MethodInfo.Invoke(_controller, args);
+
+        }
+
+    }
 };
+

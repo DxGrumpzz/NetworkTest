@@ -4,12 +4,12 @@
 
     using System;
 
-    public class Controller
+    public class Controller : ControllerBase
     {
 
         public ActionResult Action()
         {
-            Console.WriteLine($"Client called {nameof(Controller)}/{nameof(Action2)}");
+            Console.WriteLine($"Client called {nameof(Controller)}/{nameof(Action)}");
 
             return new ActionResult(ActionStatus.Success);
         }

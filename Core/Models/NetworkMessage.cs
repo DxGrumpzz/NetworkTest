@@ -13,6 +13,8 @@ namespace Core
         public string[] PathSegments => Path.Split('/');
 
         public string MessageTypeName { get; set; }
+
+        public bool RequestHasArguments => Message != null ? true : false;
     }
 };
 
