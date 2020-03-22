@@ -97,12 +97,18 @@ namespace Client
             {
             _handleReceivedEvents = false;
 
-            _client.Client.Send(_serializer.Serialize(new NetworkMessage()
+                var message = new NetworkMessage()
             {
                 Path = path,
-                Message = _serializer.Serialize(obj),
-                MessageTypeName = typeof(T).AssemblyQualifiedName,
-            }));
+                };
+
+                if(obj != null)
+                {
+                    message.Message = _serializer.Serialize(obj);
+                    message.MessageTypeName = typeof(T).AssemblyQualifiedName;
+                };
+
+                _client.Client.Send(_serializer.Serialize(message));
 
                 data = WaitForMessage<TReturn>();
             }
