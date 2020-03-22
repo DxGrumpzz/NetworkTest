@@ -147,6 +147,15 @@ namespace Client
         }
 
 
+        public void Close()
+        {
+            var networkStream = _client.GetStream();
+
+            _client.Close();
+            networkStream.Close();
+        }
+
+
         private void InitializeEventHandler()
         {
             Task.Run(() =>
