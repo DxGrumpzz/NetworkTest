@@ -1,4 +1,4 @@
-﻿namespace Server
+namespace Server
 {
     using Core;
 
@@ -220,7 +220,11 @@
                 new IPEndPoint(iPAddress, port),
                 new Json_Serializer());
 
-            server.AddController(new Controller());
+            server
+            .AddController(new Controller())
+            .AddController(new Controller2());
+
+
 
             server.InitializeServer();
 
