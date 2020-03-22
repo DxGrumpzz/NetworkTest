@@ -200,9 +200,9 @@ namespace Client
             {
                 Console.WriteLine("Event1 was called");
             })
-            .AddReceivedEvent("Event2", () =>
+            .AddReceivedEvent("Event2", (string message) =>
             {
-                Console.WriteLine("Event2 was called");
+                Console.WriteLine($"Event2 was called. \nReceived: {message}");
             });
 
             client.InitializeConnection();
