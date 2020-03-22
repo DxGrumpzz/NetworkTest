@@ -1,8 +1,6 @@
 ﻿namespace Server
 {
-    using System;
-    using System.Collections.Generic;
-    using System.Text;
+    using Core;
 
 
     /// <summary>
@@ -10,7 +8,17 @@
     /// </summary>
     public class ActionResult
     {
-        public object Result { get; set; }
+        public object Data { get; set; }
+        
+        public ActionStatus Result { get; set; }
+
+        public ActionResult() { }
+
+        public ActionResult(ActionStatus result) 
+        {
+            Result = result;
+        }
+
     };
 
 };
