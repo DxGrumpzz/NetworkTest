@@ -1,4 +1,4 @@
-﻿namespace Client
+namespace Client
 {
     using Core;
 
@@ -210,19 +210,44 @@
 
             while (true)
             {
-                Console.WriteLine("Press enter to send");
-                Console.ReadLine();
+                string[] command = Console.ReadLine().Split(' ');
 
-                string s = client.Send<TestClass, string>("Controller/Action2",
-                    new TestClass()
+                if (command[0].ToUpper() == "CLOSE")
+                {
+                    client.Close();
+                }
+                else if (command[0].ToUpper() == "SEND")
+                {
+                    if (command.Length < 2)
+                        continue;
+
+                    string path = command[1];
+
+                    string message = null;
+                    if (command.Length > 2)
                     {
-                        Text = "asdasfdfads",
+                        message = command[2];
+
+                        string s = client.Send<TestClass, string>(
+                            path: path,
+                            obj: new TestClass()
+                    {
+                                Text = message,
                         Number = int.MaxValue,
                         Bool = true,
                         Enumerable = new[] { 1, 2, 4, 8, 16 }
                     });
+                        Console.WriteLine($"Received {s}");
+                    }
+                    else
+                    {
 
+                        string s = client.Send<TestClass, string>(path: path, null);
                 Console.WriteLine($"Received {s}");
+                    }
+
+
+                }
             };
 
         }
