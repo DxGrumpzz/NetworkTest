@@ -101,13 +101,7 @@ namespace Server
 
                             if (bytes == 0)
                             {
-                                Console.ForegroundColor = ConsoleColor.Yellow;
-                                Console.WriteLine("Client disconnected");
-                                Console.ResetColor();
-
-                                _connectedClients.Remove(client);
-
-                                Console.Title = $"_connectedClients: {_connectedClients.Count}";
+                                HandleClientDisconnection(client);
                                 return;
                             };
 
@@ -212,6 +206,17 @@ namespace Server
             });
         }
 
+        private void HandleClientDisconnection(TcpClient client)
+        {
+            ClientDisconnected?.Invoke(client);
+
+            var clientStream = client.GetStream();
+
+            client.Close();
+            clientStream.Close();
+
+            _connectedClients.Remove(client);
     }
 
+};
 };
