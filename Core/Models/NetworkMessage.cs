@@ -1,12 +1,10 @@
-﻿using System.Text;
+using System.Text;
 
 namespace Core
 {
     public class NetworkMessage
     {
         public byte[] Message { get; set; }
-
-        public string MessageAsString => Encoding.UTF8.GetString(Message);
 
         public string Path { get; set; } = "";
 
