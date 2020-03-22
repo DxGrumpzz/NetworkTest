@@ -45,15 +45,34 @@
             return this;
         }
 
-
-        public void SendToAllClients(string message)
+        public void SendToAllClients<T>(string eventName, T message)
         {
-            var serializedMessage = _serializer.Serialize(message);
+            SendToClients(eventName, message);
+        }
+
+        public void SendToAllClients(string eventName)
+        {
+            SendToClients(eventName, null);
+        }
+
+        private void SendToClients(string eventName, object message)
+        {
+            var serverEvent = new ServerEvent()
+            {
+                EventName = eventName,
+            };
+
+            if (message != null)
+            {
+                serverEvent.Data = _serializer.Serialize(message);
+                serverEvent.DataTypename = message.GetType().AssemblyQualifiedName;
+            };
+
+            var serializedMessage = _serializer.Serialize(serverEvent);
 
             _connectedClients.ForEach(client =>
             client.Client.Send(serializedMessage));
         }
-
 
         private void RunServer()
         {

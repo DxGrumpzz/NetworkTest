@@ -233,9 +233,18 @@
 
                     if (command[0].ToUpper() == "CALL")
                     {
-                        string message = command[1];
+                        string eventName = command[1];
 
-                        server.SendToAllClients(message);
+                        if (command.Length > 2)
+                        {
+                            string message = command[2];
+
+                            server.SendToAllClients(eventName, message);
+                        }
+                        else
+                        {
+                            server.SendToAllClients(eventName);
+                        };
                     };
 
                 };
