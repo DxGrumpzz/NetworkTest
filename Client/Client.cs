@@ -1,33 +1,12 @@
-﻿namespace Client
+namespace Client
 {
     using Core;
 
     using System;
     using System.Net;
-    using System.Text.Json;
-    using System.Text.Json.Serialization;
 
     public class Client
     {
-        public class CustomJsonConverter : JsonConverter<object>
-        {
-            public override void Write(Utf8JsonWriter writer, object value, JsonSerializerOptions options)
-            {
-
-            }
-
-            public override object Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-            {
-                return null;
-            }
-
-            public override bool CanConvert(Type typeToConvert)
-            {
-                return true;
-            }
-
-        }
-
         public static void Main()
         {
             #region MyRegion
