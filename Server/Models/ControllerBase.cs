@@ -10,28 +10,21 @@
     /// </summary>
     public class ControllerBase
     {
-        public IEnumerable<ControllerActionInfo> GetActions
+        public IEnumerable<ControllerActionInfo> GetActions()
         {
-            get
-            {
-                var actions = GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.InvokeMethod)
-                .Where(action => action.ReturnType == typeof(ActionResult) ||
-                                 action.ReturnType.BaseType == typeof(ActionResult))
-                .Select(action =>
-                new ControllerActionInfo(action, this));
+            var actions = GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.InvokeMethod)
+            .Where(action => action.ReturnType == typeof(ActionResult) ||
+                             action.ReturnType.BaseType == typeof(ActionResult))
+            .Select(action =>
+            new ControllerActionInfo(action, this));
 
-                return actions;
-            }
+            return actions;
         }
 
-        public ControllerBase()
-        {
-
-        }
 
         public ControllerActionInfo GetAction(string actionName)
         {
-            var action = GetActions.FirstOrDefault(action => action.ActionName == actionName);
+            var action = GetActions().FirstOrDefault(action => action.ActionName == actionName);
 
             return action;
         }

@@ -58,7 +58,6 @@
             SendToClients(eventName, null);
         }
 
-
         private void SendToClients(string eventName, object message)
         {
             var serverEvent = new ServerEvent()
@@ -145,7 +144,7 @@
 
             if (controller is null)
             {
-                client.Client.Send(_serializer.Serialize($"Request failed. \nNo such controller: {controllerName}"));
+                SendToClient(client, $"Request failed. \nNo such controller: {controllerName}");
                 return;
             };
 
@@ -154,10 +153,7 @@
 
             if (action is null)
             {
-                client.Client.Send(_serializer.Serialize(new NetworkMessage()
-                {
-                    Message = _serializer.Serialize($"No such action: {actionName}"),
-                }));
+                SendToClient(client, $"No such action: {actionName}");
                 return;
             };
 
@@ -165,10 +161,7 @@
             if (request.RequestHasArguments == true &&
                action.ActionHasParameters == false)
             {
-                client.Client.Send(_serializer.Serialize(new NetworkMessage()
-                {
-                    Message = _serializer.Serialize($"Action {actionName} doesn't take an argument(s)"),
-                }));
+                SendToClient(client, $"Action {actionName} doesn't take an argument(s)");
                 return;
             };
 
@@ -176,11 +169,7 @@
             if (request.RequestHasArguments == false &&
               action.ActionHasParameters == true)
             {
-                client.Client.Send(_serializer.Serialize(new NetworkMessage()
-                {
-                    Message = _serializer.Serialize($"Action {actionName} missing argument(s)"),
-                }));
-
+                SendToClient(client, $"Action {actionName} missing argument(s)");
                 return;
             };
 
@@ -189,10 +178,7 @@
             {
                 ActionResult actionResult = action.Invoke();
 
-                client.Client.Send(_serializer.Serialize(new NetworkMessage()
-                {
-                    Message = _serializer.Serialize(actionResult.Data),
-                }));
+                SendToClient(client, actionResult.Data);
             }
             else
             {
@@ -207,10 +193,7 @@
                 {
                     ActionResult actionResult = action.Invoke<object>(obj);
 
-                    client.Client.Send(_serializer.Serialize(new NetworkMessage()
-                    {
-                        Message = _serializer.Serialize(actionResult.Data),
-                    }));
+                    SendToClient(client, actionResult.Data);
                 };
             }
         }
@@ -226,6 +209,19 @@
 
             _connectedClients.Remove(client);
         }
+
+
+
+        private void SendToClient<T>(TcpClient client, T data)
+        {
+            var networkMessage = new NetworkMessage()
+            {
+                Message = _serializer.Serialize(data),
+            };
+
+            client.Client.Send(_serializer.Serialize(networkMessage));
+        }
+
 
     };
 };
