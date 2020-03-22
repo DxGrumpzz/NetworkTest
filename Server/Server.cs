@@ -225,14 +225,25 @@ namespace Server
             .AddController(new Controller2());
 
 
+            server.ClientConnected += (client) =>
+            {
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($"Client {client.Client.RemoteEndPoint} connected");
+                Console.ResetColor();
+            };
+
+            server.ClientDisconnected += (client) =>
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine($"Client {client.Client.RemoteEndPoint} disconnected");
+                Console.ResetColor();
+            };
 
             server.InitializeServer();
 
-            Task.Run(() =>
-            {
+
                 while (true)
                 {
-
                     string[] command = Console.ReadLine().Split(' ');
 
                     if (command[0].ToUpper() == "CALL")
@@ -252,12 +263,6 @@ namespace Server
                     };
 
                 };
-            });
-
-
-            while (true)
-                Thread.Sleep(1000);
         }
     };
-
 };

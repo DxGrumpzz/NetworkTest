@@ -1,4 +1,4 @@
-﻿namespace Server
+namespace Server
 {
     using Core;
 
@@ -21,6 +21,9 @@
 
         private Dictionary<string, object> _controllers = new Dictionary<string, object>();
 
+
+        public event Action<TcpClient> ClientConnected;
+        public event Action<TcpClient> ClientDisconnected;
 
         public TestTcpServer(IPEndPoint ipEndPoint, ISerializer serializer)
         {
@@ -84,11 +87,7 @@
 
                     _connectedClients.Add(client);
 
-                    Console.ForegroundColor = ConsoleColor.Green;
-                    Console.WriteLine($"Client connected {client.Client.RemoteEndPoint}");
-                    Console.ResetColor();
-
-                    Console.Title = $"_connectedClients: {_connectedClients.Count}";
+                    ClientConnected?.Invoke(client);
 
                     Task.Run(() =>
                     {
