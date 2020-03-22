@@ -1,4 +1,4 @@
-﻿namespace Client
+namespace Client
 {
     using Core;
 
@@ -9,8 +9,6 @@
     using System.Threading;
     using System.Threading.Tasks;
 
-    public partial class Client
-    {
         public class TestTcpClient
         {
             private bool _handleReceivedEvents = true;
@@ -21,6 +19,7 @@
             private ISerializer _serializer;
 
             private Dictionary<string, Action> _receivedEvents = new Dictionary<string, Action>();
+        private Dictionary<string, Action<object>> _receivedEventsArgs = new Dictionary<string, Action<object>>();
 
 
             public TestTcpClient(IPEndPoint endPoint, ISerializer serializer, AddressFamily addressFamily = AddressFamily.InterNetwork)
@@ -89,6 +88,7 @@
             */
 
 
+
             public TReturn Send<T, TReturn>(string path, T obj)
             {
                 _handleReceivedEvents = false;
@@ -114,6 +114,7 @@
                 InitializeEventHandler();
             }
 
+
             public TestTcpClient AddReceivedEvent(string eventName, Action action)
             {
                 bool added = _receivedEvents.TryAdd(eventName, action);
@@ -123,6 +124,21 @@
 
                 return this;
             }
+
+        public TestTcpClient AddReceivedEvent<T>(string eventName, Action<T> action)
+        {
+            bool added = _receivedEventsArgs.TryAdd(eventName, 
+            (object arg) =>
+            {
+                action((T)arg);
+            });
+
+            if (added == false)
+                throw new Exception($"{eventName} event already exists");
+
+            return this;
+        }
+
 
             private void InitializeEventHandler()
             {
@@ -187,7 +203,6 @@
             }
         };
     };
-};
 
 
 /*
