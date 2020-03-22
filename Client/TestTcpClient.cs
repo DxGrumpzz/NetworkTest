@@ -1,4 +1,4 @@
-﻿namespace Client
+namespace Client
 {
     using Core;
 
@@ -91,6 +91,10 @@
 
         public TReturn Send<T, TReturn>(string path, T obj)
         {
+            TReturn data = default;
+
+            try
+            {
             _handleReceivedEvents = false;
 
             _client.Client.Send(_serializer.Serialize(new NetworkMessage()
@@ -100,9 +104,12 @@
                 MessageTypeName = typeof(T).AssemblyQualifiedName,
             }));
 
-            var data = WaitForMessage<TReturn>();
-
+                data = WaitForMessage<TReturn>();
+            }
+            finally
+            {
             _handleReceivedEvents = true;
+            };
 
             return data;
         }
@@ -148,8 +155,12 @@
                 {
                     NetworkStream networkStream = _client.GetStream();
 
-                    while (networkStream.DataAvailable == false)
+                    while (networkStream.CanRead == true &&
+                           networkStream.DataAvailable == false)
                         Thread.Sleep(1);
+
+                    if (networkStream.CanRead == false)
+                        return;
 
                     if (_handleReceivedEvents == false)
                         continue;
@@ -170,6 +181,7 @@
 
                     ServerEvent serverEvent = _serializer.Deserialize<ServerEvent>(completeRequest.ToArray());
 
+
                     if (serverEvent.EventHasArgs == true)
                     {
                         var argType = Type.GetType(serverEvent.DataTypename);
@@ -183,10 +195,10 @@
                         _receivedEvents.TryGetValue(serverEvent.EventName, out Action action);
                         action?.Invoke();
                     };
-
                 };
             });
         }
+
 
         private T WaitForMessage<T>()
         {
@@ -212,6 +224,7 @@
 
             return _serializer.Deserialize<T>(data.Message);
         }
+
     };
 };
 
