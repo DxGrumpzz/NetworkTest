@@ -1,4 +1,4 @@
-namespace Client
+﻿namespace Client
 {
     using Core;
 
@@ -231,19 +231,19 @@ namespace Client
                         string s = client.Send<TestClass, string>(
                             path: path,
                             obj: new TestClass()
-                    {
+                            {
                                 Text = message,
-                        Number = int.MaxValue,
-                        Bool = true,
-                        Enumerable = new[] { 1, 2, 4, 8, 16 }
-                    });
+                                Number = int.MaxValue,
+                                Bool = true,
+                                Enumerable = new[] { 1, 2, 4, 8, 16 }
+                            });
                         Console.WriteLine($"Received {s}");
                     }
                     else
                     {
 
                         string s = client.Send<TestClass, string>(path: path, null);
-                Console.WriteLine($"Received {s}");
+                        Console.WriteLine($"Received {s}");
                     }
 
 

@@ -1,4 +1,4 @@
-namespace Server
+﻿namespace Server
 {
     using Core;
 
@@ -17,9 +17,9 @@ namespace Server
 
         private TcpListener _server;
 
-        private List<TcpClient> _connectedClients = new List<TcpClient>();
+        private readonly List<TcpClient> _connectedClients = new List<TcpClient>();
 
-        private Dictionary<string, object> _controllers = new Dictionary<string, object>();
+        private readonly Dictionary<string, object> _controllers = new Dictionary<string, object>();
 
 
         public event Action<TcpClient> ClientConnected;
@@ -137,65 +137,65 @@ namespace Server
 
         private void HandleRequest(NetworkMessage request, TcpClient client)
         {
-                            string controllerName = request.PathSegments[0];
-                            string actionName = request.PathSegments[1];
+            string controllerName = request.PathSegments[0];
+            string actionName = request.PathSegments[1];
 
-                            _controllers.TryGetValue(controllerName, out object controller);
+            _controllers.TryGetValue(controllerName, out object controller);
 
-                            if (controllerName is null)
-                            {
-                                client.Client.Send(_serializer.Serialize($"Request failed. \nNo such controller: {controllerName}"));
+            if (controllerName is null)
+            {
+                client.Client.Send(_serializer.Serialize($"Request failed. \nNo such controller: {controllerName}"));
                 return;
-                            };
+            };
 
-                            bool requestHasArguments = request.Message != null ? true : false;
+            bool requestHasArguments = request.Message != null ? true : false;
 
-                            Type controllerType = controller.GetType();
+            Type controllerType = controller.GetType();
 
-                            var controllerActions = controllerType.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.InvokeMethod)
-                            .Where(action => action.ReturnType == typeof(ActionResult) ||
-                                             action.ReturnType.BaseType == typeof(ActionResult));
+            var controllerActions = controllerType.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.InvokeMethod)
+            .Where(action => action.ReturnType == typeof(ActionResult) ||
+                             action.ReturnType.BaseType == typeof(ActionResult));
 
-                            if (requestHasArguments == true)
+            if (requestHasArguments == true)
+            {
+                var objType = Type.GetType(request.MessageTypeName);
+
+                var obj = _serializer.Deserialize(request.Message, objType);
+
+                foreach (var action in controllerActions)
+                {
+                    var actionParams = action.GetParameters();
+                    bool actionHasParams = actionParams.Length > 0 ? true : false;
+
+                    if (actionHasParams == false)
+                        continue;
+
+                    if (action.Name == actionName)
+                    {
+                        var s1 = actionParams[0].ParameterType;
+
+                        if (objType == s1)
+                        {
+                            ActionResult actionResult = (ActionResult)action.Invoke(controller, new[] { obj });
+
+                            client.Client.Send(_serializer.Serialize(new NetworkMessage()
                             {
-                                var objType = Type.GetType(request.MessageTypeName);
-
-                                var obj = _serializer.Deserialize(request.Message, objType);
-
-                                foreach (var action in controllerActions)
-                                {
-                                    var actionParams = action.GetParameters();
-                                    bool actionHasParams = actionParams.Length > 0 ? true : false;
-
-                                    if (actionHasParams == false)
-                                        continue;
-
-                                    if (action.Name == actionName)
-                                    {
-                                        var s1 = actionParams[0].ParameterType;
-
-                                        if (objType == s1)
-                                        {
-                                            ActionResult actionResult = (ActionResult)action.Invoke(controller, new[] { obj });
-
-                                            client.Client.Send(_serializer.Serialize(new NetworkMessage()
-                                            {
                                 Message = _serializer.Serialize(actionResult.Data),
-                                            }));
+                            }));
 
                             return;
                         };
-                                    };
-                                };
-                            }
-                            else
-                            {
-                                foreach (var action in controllerActions)
-                                {
+                    };
+                };
+            }
+            else
+            {
+                foreach (var action in controllerActions)
+                {
                     bool actionHasParameters = action.GetParameters().Count() > 0;
 
-                                    if (action.Name == actionName)
-                                    {
+                    if (action.Name == actionName)
+                    {
                         if(actionHasParameters == true &&
                             requestHasArguments == false)
                         {
@@ -210,14 +210,14 @@ namespace Server
                         ActionResult actionResult = (ActionResult)action.Invoke(controller, null);
 
                         client.Client.Send(_serializer.Serialize(new NetworkMessage()
-                                        {
+                        {
                             Message = _serializer.Serialize(actionResult.Data),
                         }));
 
                         return;
-                                    };
-                                };
-                            }
+                    };
+                };
+            }
 
             client.Client.Send(_serializer.Serialize(new NetworkMessage()
             {
@@ -237,7 +237,7 @@ namespace Server
             clientStream.Close();
 
             _connectedClients.Remove(client);
-    }
+        }
 
-};
+    };
 };

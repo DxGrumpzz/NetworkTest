@@ -1,4 +1,4 @@
-namespace Server
+﻿namespace Server
 {
     using Core;
 
@@ -242,27 +242,27 @@ namespace Server
             server.InitializeServer();
 
 
-                while (true)
+            while (true)
+            {
+                string[] command = Console.ReadLine().Split(' ');
+
+                if (command[0].ToUpper() == "CALL")
                 {
-                    string[] command = Console.ReadLine().Split(' ');
+                    string eventName = command[1];
 
-                    if (command[0].ToUpper() == "CALL")
+                    if (command.Length > 2)
                     {
-                        string eventName = command[1];
+                        string message = command[2];
 
-                        if (command.Length > 2)
-                        {
-                            string message = command[2];
-
-                            server.SendToAllClients(eventName, message);
-                        }
-                        else
-                        {
-                            server.SendToAllClients(eventName);
-                        };
+                        server.SendToAllClients(eventName, message);
+                    }
+                    else
+                    {
+                        server.SendToAllClients(eventName);
                     };
-
                 };
+
+            };
         }
     };
 };

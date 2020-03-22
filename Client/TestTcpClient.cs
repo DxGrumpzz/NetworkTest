@@ -1,4 +1,4 @@
-namespace Client
+﻿namespace Client
 {
     using Core;
 
@@ -95,11 +95,11 @@ namespace Client
 
             try
             {
-            _handleReceivedEvents = false;
+                _handleReceivedEvents = false;
 
                 var message = new NetworkMessage()
-            {
-                Path = path,
+                {
+                    Path = path,
                 };
 
                 if(obj != null)
@@ -114,7 +114,7 @@ namespace Client
             }
             finally
             {
-            _handleReceivedEvents = true;
+                _handleReceivedEvents = true;
             };
 
             return data;
@@ -140,7 +140,7 @@ namespace Client
 
         public TestTcpClient AddReceivedEvent<T>(string eventName, Action<T> action)
         {
-            bool added = _receivedEventsArgs.TryAdd(eventName, 
+            bool added = _receivedEventsArgs.TryAdd(eventName,
             (object arg) =>
             {
                 action((T)arg);
