@@ -1,4 +1,4 @@
-﻿namespace Server
+namespace Server
 {
     using Core;
 
@@ -24,6 +24,7 @@
 
         public event Action<TcpClient> ClientConnected;
         public event Action<TcpClient> ClientDisconnected;
+
 
         public TestTcpServer(IPEndPoint ipEndPoint, ISerializer serializer)
         {
@@ -57,6 +58,7 @@
         {
             SendToClients(eventName, null);
         }
+
 
         private void SendToClients(string eventName, object message)
         {
@@ -134,7 +136,6 @@
             });
         }
 
-
         private void HandleRequest(NetworkMessage request, TcpClient client)
         {
             string controllerName = request.PathSegments[0];
@@ -156,75 +157,71 @@
             .Where(action => action.ReturnType == typeof(ActionResult) ||
                              action.ReturnType.BaseType == typeof(ActionResult));
 
-            if (requestHasArguments == true)
-            {
-                var objType = Type.GetType(request.MessageTypeName);
+            var action = controllerActions.FirstOrDefault(action => action.Name == actionName);
 
-                var obj = _serializer.Deserialize(request.Message, objType);
 
-                foreach (var action in controllerActions)
+            if (action is null)
                 {
-                    var actionParams = action.GetParameters();
-                    bool actionHasParams = actionParams.Length > 0 ? true : false;
-
-                    if (actionHasParams == false)
-                        continue;
-
-                    if (action.Name == actionName)
+                client.Client.Send(_serializer.Serialize(new NetworkMessage()
                     {
-                        var s1 = actionParams[0].ParameterType;
+                    Message = _serializer.Serialize($"No such action: {actionName}"),
+                }));
+                return;
+            };
 
-                        if (objType == s1)
-                        {
-                            ActionResult actionResult = (ActionResult)action.Invoke(controller, new[] { obj });
+            var actionHasParameters = action.GetParameters().Count() > 0;
 
+            if (requestHasArguments == true &&
+               actionHasParameters == false)
+            {
                             client.Client.Send(_serializer.Serialize(new NetworkMessage()
                             {
-                                Message = _serializer.Serialize(actionResult.Data),
+                    Message = _serializer.Serialize($"Action {actionName} doesn't take an argument(s)"),
                             }));
-
                             return;
                         };
-                    };
-                };
-            }
-            else
-            {
-                foreach (var action in controllerActions)
-                {
-                    bool actionHasParameters = action.GetParameters().Count() > 0;
 
-                    if (action.Name == actionName)
-                    {
-                        if(actionHasParameters == true &&
-                            requestHasArguments == false)
+            if (requestHasArguments == false &&
+              actionHasParameters == true)
                         {
                             client.Client.Send(_serializer.Serialize(new NetworkMessage()
                             {
-                                Message = _serializer.Serialize($"Action {actionName} missing argument"),
+                    Message = _serializer.Serialize($"Action {actionName} missing argument(s)"),
                             }));
 
                             return;
                         };
 
+
+
+            if (requestHasArguments == false)
+            {
                         ActionResult actionResult = (ActionResult)action.Invoke(controller, null);
 
                         client.Client.Send(_serializer.Serialize(new NetworkMessage()
                         {
                             Message = _serializer.Serialize(actionResult.Data),
                         }));
-
-                        return;
-                    };
-                };
             }
+            else
+            {
+                var actionParams = action.GetParameters();
+                var actionParam = actionParams[0].ParameterType;
+
+                var objType = Type.GetType(request.MessageTypeName);
+
+                var obj = _serializer.Deserialize(request.Message, objType);
+
+                if (objType == actionParam)
+                {
+                    ActionResult actionResult = (ActionResult)action.Invoke(controller, new[] { obj });
 
             client.Client.Send(_serializer.Serialize(new NetworkMessage()
             {
-                Message = _serializer.Serialize($"No such action: {actionName}"),
+                        Message = _serializer.Serialize(actionResult.Data),
             }));
-
-            return;
+                };
+            }
         }
 
         private void HandleClientDisconnection(TcpClient client)
