@@ -8,6 +8,7 @@
         Json = 0,
         Xml = 1,
         Binary = 2,
+        Custom = 3,
     };
 };
 

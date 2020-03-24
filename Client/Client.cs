@@ -4,6 +4,7 @@
 
     using System;
     using System.Net;
+    using System.Threading;
 
     public class Client
     {
@@ -28,7 +29,8 @@
                 Console.WriteLine($"Event2 was called. \nReceived: {message}");
             });
 
-            client.InitializeConnection();
+
+            client.InitializeConnectionSecure("LocalHost");
 
 
             while (true)
@@ -51,7 +53,7 @@
                     {
                         message = command[2];
 
-                        string s = client.Send<TestClass, string>(
+                        NetworkMessage s = client.SendSecure(
                             path: path,
                             obj: new TestClass()
                             {
@@ -60,13 +62,14 @@
                                 Bool = true,
                                 Enumerable = new[] { 1, 2, 4, 8, 16 }
                             });
-                        Console.WriteLine($"Received {s}");
+
+                        Console.WriteLine($"Received {s.MessageAs<string>()}");
                     }
                     else
                     {
 
-                        string s = client.Send<TestClass, string>(path: path, null);
-                        Console.WriteLine($"Received {s}");
+                        NetworkMessage s = client.SendSecure<TestClass>(path: path, null);
+                        Console.WriteLine($"Received {s.MessageAs<string>()}");
                     }
 
 

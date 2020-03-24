@@ -37,5 +37,27 @@
         /// A Boolean flag that indicates if this request contains any arguemnts that will be passed to an Action
         /// </summary>
         public bool RequestHasArguments => Message != null ? true : false;
+
+        /// <summary>
+        /// The type of serializer used to serialize this message
+        /// </summary>
+        public SerializerType SerializerType { get; set; }
+
+
+        /// <summary>
+        /// Deserializes this message as T
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <returns></returns>
+        public T MessageAs<T>()
+        {
+            if (SerializerType == SerializerType.Json)
+            {
+                return new Json_Serializer().Deserialize<T>(Message);
+            };
+
+            return default;
+        }
+
     }
 };

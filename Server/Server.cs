@@ -40,7 +40,7 @@
                 Console.ResetColor();
             };
 
-            server.InitializeServer();
+            server.InitializeSecureServer();
 
 
             while (true)
@@ -55,11 +55,11 @@
                     {
                         string message = command[2];
 
-                        server.SendToAllClients(eventName, message);
+                        server.SendToAllClientsSecure(eventName, message);
                     }
                     else
                     {
-                        server.SendToAllClients(eventName);
+                        server.SendToAllClientsSecure(eventName);
                     };
                 };
 
