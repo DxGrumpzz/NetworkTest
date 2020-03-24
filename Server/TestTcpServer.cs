@@ -127,9 +127,7 @@
 
                     if (readBytes == 0)
                     {
-                        Debugger.Break();
-
-                        ClientDisconnected?.Invoke(client);
+                        HandleClientDisconnection(client);
                         return;
                     };
 
@@ -149,7 +147,6 @@
                 Debugger.Break();
                 return;
             }
-
             catch (IOException exception)
             {
                 // Invoke the ClientDisconnected event

@@ -5,6 +5,7 @@
     using System;
     using System.Collections.Generic;
     using System.Diagnostics;
+    using System.IO;
     using System.Net;
     using System.Net.Security;
     using System.Net.Sockets;
@@ -269,63 +270,71 @@
             // Start a background thread
             Task.Run(() =>
             {
-                // Continiously try and see if there's any data avaiilable
-                while (true)
+                try
                 {
-                    //SslStream secureStream = GetAuthenticatedStream("LocalHost");
 
-                    byte[] sizeBuffer = new byte[8];
-                    int readBytes = secureStream.Read(sizeBuffer, 0, 8);
-
-                    if (readBytes == 0)
+                    // Continiously try and see if there's any data avaiilable
+                    while (true)
                     {
-                        Debugger.Break();
+                        //SslStream secureStream = GetAuthenticatedStream("LocalHost");
 
-                        return;
-                    };
+                        byte[] sizeBuffer = new byte[8];
+                        int readBytes = secureStream.Read(sizeBuffer, 0, 8);
 
-                    int requestSize = GetRequestSize(sizeBuffer);
-                    byte[] buffer = new byte[requestSize];
-                    readBytes = secureStream.Read(buffer);
+                        if (readBytes == 0)
+                        {
+                            Debugger.Break();
+                            return;
+                        };
 
-                    // If the client sent a message to the server and is expecting a result
-                    if (_handleReceivedEvents == false)
-                    {
+                        int requestSize = GetRequestSize(sizeBuffer);
+                        byte[] buffer = new byte[requestSize];
+                        readBytes = secureStream.Read(buffer);
+
+                        // If the client sent a message to the server and is expecting a result
+                        if (_handleReceivedEvents == false)
+                        {
+                            // If we reached here, all data was read. Deserilize the data to a ServerEvent 
+                            NetworkMessage networkMessage = _serializer.Deserialize<NetworkMessage>(buffer);
+
+                            _action = () => networkMessage;
+                            _manualResetEvent.Set();
+
+                            // Don't handle *this request
+                            continue;
+                        }
+
                         // If we reached here, all data was read. Deserilize the data to a ServerEvent 
-                        NetworkMessage networkMessage = _serializer.Deserialize<NetworkMessage>(buffer);
+                        ServerEvent serverEvent = _serializer.Deserialize<ServerEvent>(buffer);
 
-                        _action = () => networkMessage;
-                        _manualResetEvent.Set();
+                        // If the server event contains arguemnts
+                        if (serverEvent.EventHasArgs == true)
+                        {
+                            // Get the argument type from the DataTypename
+                            var argType = Type.GetType(serverEvent.DataTypename);
 
-                        // Don't handle *this request
-                        continue;
-                    }
+                            // Try to find an event with the corresponding name
+                            _receivedEventsArgs.TryGetValue(serverEvent.EventName, out Action<object> action);
 
-                    // If we reached here, all data was read. Deserilize the data to a ServerEvent 
-                    ServerEvent serverEvent = _serializer.Deserialize<ServerEvent>(buffer);
+                            // Call the event and pass it the arguments 
+                            action?.Invoke(_serializer.Deserialize(serverEvent.Data, argType));
+                        }
+                        // If no arguments present
+                        else
+                        {
+                            // Try to find the event 
+                            _receivedEvents.TryGetValue(serverEvent.EventName, out Action action);
 
-                    // If the server event contains arguemnts
-                    if (serverEvent.EventHasArgs == true)
-                    {
-                        // Get the argument type from the DataTypename
-                        var argType = Type.GetType(serverEvent.DataTypename);
-
-                        // Try to find an event with the corresponding name
-                        _receivedEventsArgs.TryGetValue(serverEvent.EventName, out Action<object> action);
-
-                        // Call the event and pass it the arguments 
-                        action?.Invoke(_serializer.Deserialize(serverEvent.Data, argType));
-                    }
-                    // If no arguments present
-                    else
-                    {
-                        // Try to find the event 
-                        _receivedEvents.TryGetValue(serverEvent.EventName, out Action action);
-
-                        // And call it
-                        action?.Invoke();
+                            // And call it
+                            action?.Invoke();
+                        };
                     };
-                };
+                }
+                catch(IOException ioException)
+                {
+                    _client.Close();
+                    _secureStream.Close();
+                }
             });
         }
 
@@ -381,6 +390,8 @@
 
             _client.Close();
             networkStream.Close();
+
+            _secureStream.Close();
         }
 
 
