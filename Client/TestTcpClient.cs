@@ -214,8 +214,12 @@
                 Path = path,
 
                 SerializerType = _serializerType,
-                Message = _serializer.Serialize(obj),
-                MessageTypeName = typeof(T).AssemblyQualifiedName,
+            };
+
+            if (obj != null)
+            {
+                netMessage.Message = _serializer.Serialize(obj);
+                netMessage.MessageTypeName = typeof(T).AssemblyQualifiedName;
             };
 
             StringBuilder message = new StringBuilder(Encoding.UTF8.GetString(_serializer.Serialize(netMessage)));

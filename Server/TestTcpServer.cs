@@ -5,6 +5,7 @@
     using System;
     using System.Collections.Generic;
     using System.Diagnostics;
+    using System.IO;
     using System.Net;
     using System.Net.Security;
     using System.Net.Sockets;
@@ -39,7 +40,7 @@
         /// A list of connected clients
         /// </summary>
         private readonly List<TcpClient> _connectedClients = new List<TcpClient>();
-        
+
         private readonly List<(TcpClient, SslStream)> _connectedClients2 = new List<(TcpClient, SslStream)>();
 
         /// <summary>
@@ -83,7 +84,7 @@
         }
 
 
-        public void InitializeSecureServer()
+        public void InitializeServerSecure()
         {
             string certificateLocation = @"C:\Users\yosi1\Desktop\New folder\Cretificate.pfx";
             _serverCertificate = new X509Certificate(certificateLocation, "asdf");
@@ -96,8 +97,10 @@
                 while (true)
                 {
                     TcpClient client = _server.AcceptTcpClient();
-
-                    ProcessCLient(client);
+                    Task.Run(() =>
+                    {
+                        ProcessCLient(client);
+                    });
                 };
             });
         }
@@ -146,12 +149,17 @@
                 Debugger.Break();
                 return;
             }
-            finally
-            {
-                Debugger.Break();
 
-                secureStream.Close();
+            catch (IOException exception)
+            {
+                // Invoke the ClientDisconnected event
+                ClientDisconnected?.Invoke(client);
+
+                // Close the connection and stream
                 client.Close();
+
+                // Remove the client from the list
+                _connectedClients2.Remove((client, secureStream));
             }
         }
 
@@ -267,7 +275,7 @@
             if (request.RequestHasArguments == true &&
                action.ActionHasParameters == false)
             {
-                SendToClientSecure(secureStream, $"Action {actionName} doesn't take an argument(s)");
+                SendToClientSecure(secureStream, $"Action {actionName} doesn't take a arguments");
                 return;
             };
 
