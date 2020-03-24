@@ -1,5 +1,8 @@
 ﻿namespace Core
 {
+    /// <summary>
+    /// The type of serializer used to deserialize/serialize the data
+    /// </summary>
     public enum SerializerType
     {
         Json = 0,

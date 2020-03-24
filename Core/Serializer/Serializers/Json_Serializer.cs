@@ -1,11 +1,16 @@
 ﻿namespace Core
 {
     using System;
-    using System.Text;
     using System.Text.Json;
 
+    /// <summary>
+    /// The "default" implementation of a Json serializer, using System.Text.Json 
+    /// </summary>
     public class Json_Serializer : ISerializer
     {
+        /// <summary>
+        /// Options that can be passed to the json serializer
+        /// </summary>
         private JsonSerializerOptions _options;
 
 
@@ -17,10 +22,7 @@
 
         public byte[] Serialize<T>(T obj)
         {
-            var b = JsonSerializer.SerializeToUtf8Bytes(obj, _options);
-            string s = Encoding.UTF8.GetString(b);
-
-            return b;
+            return JsonSerializer.SerializeToUtf8Bytes(obj, _options);
         }
 
 

@@ -9,19 +9,53 @@
     using System.Threading;
     using System.Threading.Tasks;
 
+    /// <summary>
+    /// A simple TCP client. Provides some extra functionality for network communication
+    /// </summary>
     public class TestTcpClient
     {
+        #region Private fields
+
+        /// <summary>
+        /// A boolean flag that indicates if the client should wait for server-received events
+        /// </summary>
         private bool _handleReceivedEvents = true;
 
+        /// <summary>
+        /// The underlying client 
+        /// </summary>
         private TcpClient _client;
+
+        /// <summary>
+        /// The address endpoint of the server
+        /// </summary>
         private IPEndPoint _endPoint;
 
+        /// <summary>
+        /// The type of serializer
+        /// </summary>
         private ISerializer _serializer;
 
+
+        /// <summary>
+        /// A dictionary that contains registered client side events
+        /// </summary>
         private Dictionary<string, Action> _receivedEvents = new Dictionary<string, Action>();
+
+        /// <summary>
+        /// A dictionary that contains registered client side events that can take an argument
+        /// </summary>
         private Dictionary<string, Action<object>> _receivedEventsArgs = new Dictionary<string, Action<object>>();
 
-
+        #endregion
+   
+        
+        /// <summary>
+        /// Constructor that can take a custom made serializer
+        /// </summary>
+        /// <param name="endPoint"></param>
+        /// <param name="serializer"></param>
+        /// <param name="addressFamily"></param>
         public TestTcpClient(IPEndPoint endPoint, ISerializer serializer, AddressFamily addressFamily = AddressFamily.InterNetwork)
         {
             _client = new TcpClient(addressFamily);
@@ -30,6 +64,12 @@
             _endPoint = endPoint;
         }
 
+        /// <summary>
+        /// Default constructor
+        /// </summary>
+        /// <param name="endPoint"></param>
+        /// <param name="serializerType"></param>
+        /// <param name="addressFamily"></param>
         public TestTcpClient(IPEndPoint endPoint, SerializerType serializerType = SerializerType.Json, AddressFamily addressFamily = AddressFamily.InterNetwork) :
             this(endPoint, null, addressFamily)
         {
@@ -48,47 +88,81 @@
         }
 
 
-        public TReturn Send<T, TReturn>(string path, T obj)
+        #region Public methods
+
+
+        /// <summary>
+        /// Sends some data to the server an waits for a response
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <typeparam name="TReturn"></typeparam>
+        /// <param name="path"></param>
+        /// <param name="obj"></param>
+        /// <returns></returns>
+        public TReturn Send<T, TReturn>(string path, T obj = default)
         {
+            // Holds the data that was received
             TReturn data = default;
 
             try
             {
+                // Stop client from handling server events
                 _handleReceivedEvents = false;
 
+                // The network message that will be sent to the server
                 var message = new NetworkMessage()
                 {
                     Path = path,
                 };
 
-                if(obj != null)
+                // If the request should contain data
+                if (obj != null)
                 {
+                    // Serialze the data 
                     message.Message = _serializer.Serialize(obj);
+
+                    // Set the type of data (To which type of object it should be serialized to)
                     message.MessageTypeName = typeof(T).AssemblyQualifiedName;
                 };
 
+                // Sent the data to the server
                 _client.Client.Send(_serializer.Serialize(message));
 
+                // Wait for a response from the server
                 data = WaitForMessage<TReturn>();
             }
             finally
             {
+                // No matter what happes in the try block, allow the client to handle server-events again
                 _handleReceivedEvents = true;
             };
 
             return data;
         }
 
+
+        /// <summary>
+        /// Initializes a connection between the client and the server
+        /// </summary>
         public void InitializeConnection()
         {
+            // Connect to the server
             _client.Connect(_endPoint);
 
+            // Setup server-event handler
             InitializeEventHandler();
         }
 
 
+        /// <summary>
+        /// Register a client-side event 
+        /// </summary>
+        /// <param name="eventName"> The name of the event </param>
+        /// <param name="action"> The action to execute </param>
+        /// <returns></returns>
         public TestTcpClient AddReceivedEvent(string eventName, Action action)
         {
+            // Try to add the event
             bool added = _receivedEvents.TryAdd(eventName, action);
 
             if (added == false)
@@ -97,9 +171,18 @@
             return this;
         }
 
+        /// <summary>
+        /// Register a client-side event, that can take an argument
+        /// </summary>
+        /// <param name="eventName"> The name of the event </param>
+        /// <param name="action"> The action to execute </param>
+        /// <returns></returns>
         public TestTcpClient AddReceivedEvent<T>(string eventName, Action<T> action)
         {
+            // Try to add the event
             bool added = _receivedEventsArgs.TryAdd(eventName,
+            // Because you obviously can't convert an Action<T> to Action<object>, 
+            // I used a simple lambda that takes an object and converts it to T
             (object arg) =>
             {
                 action((T)arg);
@@ -112,8 +195,12 @@
         }
 
 
+        /// <summary>
+        /// Closes the connection between the server and client
+        /// </summary>
         public void Close()
         {
+            // Close the underlying stream and socket connection 
             var networkStream = _client.GetStream();
 
             _client.Close();
@@ -121,83 +208,124 @@
         }
 
 
+        #endregion
+
+
+        #region Private helpers
+
+        /// <summary>
+        /// Initializes server-event hanlding
+        /// </summary>
         private void InitializeEventHandler()
         {
+            // Start a background thread
             Task.Run(() =>
             {
+                // Continiously try and see if there's any data avaiilable
                 while (true)
                 {
+                    // Get the client's stream 
                     NetworkStream networkStream = _client.GetStream();
 
+                    // Wait until data is present
                     while (networkStream.CanRead == true &&
                            networkStream.DataAvailable == false)
                         Thread.Sleep(1);
 
+                    // If the stream isn't read-able 
                     if (networkStream.CanRead == false)
+                        // Break out of the function
                         return;
 
+                    // If the client sent a message to the server and is expecting a result
                     if (_handleReceivedEvents == false)
+                        // Don't handle *this request
                         continue;
 
+                    // Read the data
+                    var completeRequest = ReadReceivedPacket(networkStream);
 
-                    byte[] buffer = new byte[1024];
-                    List<byte> completeRequest = new List<byte>();
+                    // If we reached here, all data was read. Deserilize the data to a ServerEvent 
+                    ServerEvent serverEvent = _serializer.Deserialize<ServerEvent>(completeRequest);
 
-                    while (networkStream.DataAvailable == true)
-                    {
-                        int readBytes = networkStream.Read(buffer, 0, buffer.Length);
-
-                        for (int a = 0; a < readBytes; a++)
-                        {
-                            completeRequest.Add(buffer[a]);
-                        };
-                    };
-
-                    ServerEvent serverEvent = _serializer.Deserialize<ServerEvent>(completeRequest.ToArray());
-
-
+                    // If the server event contains arguemnts
                     if (serverEvent.EventHasArgs == true)
                     {
+                        // Get the argument type from the DataTypename
                         var argType = Type.GetType(serverEvent.DataTypename);
 
+                        // Try to find an event with the corresponding name
                         _receivedEventsArgs.TryGetValue(serverEvent.EventName, out Action<object> action);
 
+                        // Call the event and pass it the arguments 
                         action?.Invoke(_serializer.Deserialize(serverEvent.Data, argType));
                     }
+                    // If no arguments present
                     else
                     {
+                        // Try to find the event 
                         _receivedEvents.TryGetValue(serverEvent.EventName, out Action action);
+
+                        // And call it
                         action?.Invoke();
                     };
                 };
             });
         }
 
-
+        /// <summary>
+        /// Waits for a message to be received
+        /// </summary>
+        /// <typeparam name="T"> The type of message expected </typeparam>
+        /// <returns></returns>
         private T WaitForMessage<T>()
         {
+            // Get the client's stream
             NetworkStream networkStream = _client.GetStream();
 
+            // Wait until there is actually data available
             while (networkStream.DataAvailable == false)
                 Thread.Sleep(1);
 
+            // Read the data
+            var completeRequest = ReadReceivedPacket(networkStream);
+
+            // Deserialize the packet into a NetworkMessage
+            NetworkMessage data = _serializer.Deserialize<NetworkMessage>(completeRequest);
+
+            // Further deserilize the inner message to T
+            return _serializer.Deserialize<T>(data.Message);
+        }
+
+
+        /// <summary>
+        /// Reads received packet entirely
+        /// </summary>
+        /// <param name="networkStream"> The stream containing the data </param>
+        /// <returns></returns>
+        private byte[] ReadReceivedPacket(NetworkStream networkStream)
+        {
+            // Allocate some buffers to store the request data
             byte[] buffer = new byte[1024];
             List<byte> completeRequest = new List<byte>();
 
+            // White there is data present
             while (networkStream.DataAvailable == true)
             {
+                // Read the data into the buffer
                 int readBytes = networkStream.Read(buffer, 0, buffer.Length);
 
+                // Insert the read data into the completeRequest list
                 for (int a = 0; a < readBytes; a++)
                 {
                     completeRequest.Add(buffer[a]);
                 };
             };
 
-            NetworkMessage data = _serializer.Deserialize<NetworkMessage>(completeRequest.ToArray());
-
-            return _serializer.Deserialize<T>(data.Message);
+            return completeRequest.ToArray();
         }
+
+        #endregion
 
     };
 };
