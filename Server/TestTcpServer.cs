@@ -21,34 +21,51 @@
     public class TestTcpServer
     {
 
+        #region Private fields
+
         /// <summary>
         /// This server's IP address
         /// </summary>
         private readonly IPEndPoint _ipEndPoint;
 
         /// <summary>
+        /// The underlying server connection
+        /// </summary>
+        private TcpListener _server;
+
+
+        /// <summary>
         /// A serializer that is used to serializer/deserialize the network data
         /// </summary>
         private readonly ISerializer _serializer;
 
-        /// <summary>
-        /// The underlying server connection
-        /// </summary>
-        private TcpListener _server;
 
         /// <summary>
         /// A list of connected clients
         /// </summary>
         private readonly List<TcpClient> _connectedClients = new List<TcpClient>();
 
-        private readonly List<(TcpClient, SslStream)> _connectedClients2 = new List<(TcpClient, SslStream)>();
+        /// <summary>
+        /// A list of connected clients. Used when SecureConnection is called
+        /// </summary>
+        private readonly List<(TcpClient, SslStream)> _connectedClientsSecure = new List<(TcpClient, SslStream)>();
 
         /// <summary>
         /// A list of registered controller
         /// </summary>
         private readonly Dictionary<string, ControllerBase> _controllers = new Dictionary<string, ControllerBase>();
 
+
+        /// <summary>
+        /// A certificate used to encrypt or decrypt any received or sent data
+        /// </summary>
         private X509Certificate _serverCertificate;
+
+        #endregion
+
+
+
+        #region Events
 
         /// <summary>
         /// An event that will be fired when a client is connected
@@ -60,12 +77,27 @@
         /// </summary>
         public event Action<TcpClient> ClientDisconnected;
 
+        #endregion
 
+
+
+        /// <summary>
+        /// Default construcotr
+        /// </summary>
+        /// <param name="ipEndPoint"></param>
+        /// <param name="serializer"></param>
         public TestTcpServer(IPEndPoint ipEndPoint, ISerializer serializer)
         {
             _ipEndPoint = ipEndPoint;
             _serializer = serializer;
         }
+
+
+
+        #region Public methods
+
+
+        #region Insecure
 
 
         /// <summary>
@@ -84,94 +116,82 @@
         }
 
 
-        public void InitializeServerSecure()
+        /// <summary>
+        /// Send a message to every connected client
+        /// </summary>
+        /// <typeparam name="T"> The type of the message </typeparam>
+        /// <param name="eventName"> The name of the client-side event </param>
+        /// <param name="message"> The message to send </param>
+        public void SendToAllClients<T>(string eventName, T message)
         {
-            string certificateLocation = @"C:\Users\yosi1\Desktop\New folder\Cretificate.pfx";
-            _serverCertificate = new X509Certificate(certificateLocation, "asdf");
+            SendToClients(eventName, message);
+        }
 
+
+        /// <summary>
+        /// Send a message to every connected client
+        /// </summary>
+        /// <param name="eventName"> The name of the client-side event </param>
+        public void SendToAllClients(string eventName)
+        {
+            SendToClients(eventName, null);
+        }
+
+
+        #endregion
+
+
+        #region Secure
+
+        /// <summary>
+        /// Initializes the server under a secure connection using SSL
+        /// </summary>
+        /// <param name="certificateLocation"> The location of the certificate *.pfx file </param>
+        /// <param name="certificatePassword"> The certificate's password *HIGHLY* recommended to use a password that is read rom file </param>
+        public void InitializeServerSecure(string certificateLocation, string certificatePassword)
+        {
+            // Create the certificate
+            _serverCertificate = new X509Certificate(certificateLocation, certificatePassword);
+
+            // Initialize the server
             _server = new TcpListener(_ipEndPoint);
 
+            // Start the server 
             _server.Start();
+
+
             Task.Run(() =>
             {
                 while (true)
                 {
+                    // Continiously accept incoming clients
                     TcpClient client = _server.AcceptTcpClient();
+
                     Task.Run(() =>
                     {
-                        ProcessCLient(client);
+                        ProcessClientSecure(client);
                     });
                 };
             });
         }
 
 
-
-        private void ProcessCLient(TcpClient client)
-        {
-            SslStream secureStream = new SslStream(client.GetStream());
-
-            try
-            {
-                secureStream.AuthenticateAsServer(_serverCertificate);
-
-                ClientConnected?.Invoke(client);
-
-                _connectedClients2.Add((client, secureStream));
-
-                int readBytes = 0;
-                while (true)
-                {
-                    byte[] sizeBuffer = new byte[8];
-                    readBytes = secureStream.Read(sizeBuffer, 0, 8);
-
-                    if (readBytes == 0)
-                    {
-                        HandleClientDisconnection(client);
-                        return;
-                    };
-
-                    int requestSize = GetRequestSize(sizeBuffer);
-
-                    byte[] buffer = new byte[requestSize];
-                    readBytes = secureStream.Read(buffer);
-
-
-                    var netMessage = _serializer.Deserialize<NetworkMessage>(buffer);
-
-                    HandleRequestSecure(netMessage, secureStream);
-                };
-            }
-            catch (AuthenticationException e)
-            {
-                Debugger.Break();
-                return;
-            }
-            catch (IOException exception)
-            {
-                // Invoke the ClientDisconnected event
-                ClientDisconnected?.Invoke(client);
-
-                // Close the connection and stream
-                client.Close();
-
-                // Remove the client from the list
-                _connectedClients2.Remove((client, secureStream));
-            }
-        }
-
-        private int GetRequestSize(byte[] buffer)
-        {
-            int size = Convert.ToInt32(Encoding.UTF8.GetString(buffer));
-
-            return size;
-        }
-
+        /// <summary>
+        /// Invokes an event on the client side. Sent to every client
+        /// </summary>
+        /// <param name="eventName"></param>
         public void SendToAllClientsSecure(string eventName)
         {
             SendToAllClientsSecure<object>(eventName, null);
         }
 
+
+        /// <summary>
+        /// Invokes an event that takes an argument on the client side. Sent to every client
+        /// </summary>
+        /// <typeparam name="T"> The type of the data </typeparam>
+        /// <param name="eventName"> The name of the event to invoke </param>
+        /// <param name="data"> The data that will be sent to the client's event </param>
         public void SendToAllClientsSecure<T>(string eventName, T data)
         {
             // The ServerEvent that will be sent to the client
@@ -191,139 +211,41 @@
             };
 
 
-            // Send the serializedMessage to every client
-            _connectedClients2.ForEach(client =>
+            // Serialize the NetworkMessage
+            byte[] serializerdMessageBytes = _serializer.Serialize(serverEvent);
+
+            // The size of the message *After the operation
+            int messageSize = serializerdMessageBytes.Length + 8;
+
+            byte[] messageBytes = new byte[messageSize];
+
+            // Using a memory stream to manipulate the buffers
+            using (MemoryStream memoryStream = new MemoryStream(messageSize))
             {
-                StringBuilder message = new StringBuilder(Encoding.UTF8.GetString(_serializer.Serialize(serverEvent)));
+                // Get the size of the request,
+                long size = serializerdMessageBytes.Length;
+                // Turn it into a string with a 8 character padding
+                string sizePadded = size.ToString().PadRight(8);
 
-                int size = message.Length;
-                string sizeAsString = size.ToString();
-                string sizePadded = sizeAsString.PadRight(8);
+                // Write the request size into the MemoryStrem buffer
+                memoryStream.Write(Encoding.UTF8.GetBytes(sizePadded));
 
-                message.Insert(0, sizePadded);
+                // Write the actuall request into the MemoryStrem buffer
+                memoryStream.Write(serializerdMessageBytes);
 
-                for (int a = 0; a < sizeAsString.Length; a++)
-                {
-                    message[a] = sizeAsString[a];
-                };
+                // Set the MemoryStream buffer in messageBytes
+                messageBytes = memoryStream.ToArray();
+            };
 
-                byte[] messageBytes = Encoding.UTF8.GetBytes(message.ToString());
-
+            // Send the serializedMessage to every client
+            _connectedClientsSecure.ForEach(client =>
+            {
                 client.Item2.Write(messageBytes);
-                client.Item2.Flush();
             });
         }
 
-        private void SendToClientSecure<T>(SslStream secureStream, T data)
-        {
-            NetworkMessage netMessage = new NetworkMessage()
-            {
-                Message = _serializer.Serialize(data),
-                MessageTypeName = typeof(T).AssemblyQualifiedName,
-            };
 
-            StringBuilder message = new StringBuilder(Encoding.UTF8.GetString(_serializer.Serialize(netMessage)));
-
-            int size = message.Length;
-            string sizeAsString = size.ToString();
-            string sizePadded = sizeAsString.PadRight(8);
-
-            message.Insert(0, sizePadded);
-
-            for (int a = 0; a < sizeAsString.Length; a++)
-            {
-                message[a] = sizeAsString[a];
-            };
-
-            byte[] messageBytes = Encoding.UTF8.GetBytes(message.ToString());
-
-            secureStream.Write(messageBytes);
-            secureStream.Flush();
-        }
-
-
-        private void HandleRequestSecure(NetworkMessage request, SslStream secureStream)
-        {
-            // Get the request's controller and action names from path
-            string controllerName = request.PathSegments[0];
-            string actionName = request.PathSegments[1];
-
-            // Try to find the controller
-            _controllers.TryGetValue(controllerName, out ControllerBase controller);
-
-            // If no controller was found
-            if (controller is null)
-            {
-                SendToClientSecure(secureStream, $"Request failed. \nNo such controller: {controllerName}");
-                return;
-            };
-
-            // Try to find the action
-            var action = controller.GetAction(actionName);
-
-            // If no action was found
-            if (action is null)
-            {
-                SendToClientSecure(secureStream, $"No such action: {actionName}");
-                return;
-            };
-
-            // Request-argument validation
-            if (request.RequestHasArguments == true &&
-               action.ActionHasParameters == false)
-            {
-                SendToClientSecure(secureStream, $"Action {actionName} doesn't take a arguments");
-                return;
-            };
-
-            if (request.RequestHasArguments == false &&
-              action.ActionHasParameters == true)
-            {
-                SendToClientSecure(secureStream, $"Action {actionName} missing argument(s)");
-                return;
-            };
-
-
-            // if the request doesn't contain arguments
-            if (request.RequestHasArguments == false)
-            {
-                // Call the action
-                ActionResult actionResult = action.Invoke();
-
-                // Send the action result to the client
-                SendToClientSecure(secureStream, actionResult.Data);
-            }
-            // if the request contains arguments
-            else
-            {
-                // Get the action's paramters
-                var actionParams = action.Parameters;
-
-                // The action's parameter type
-                var actionParamType = actionParams[0].ParameterType;
-
-                // The type of the request 
-                var objType = Type.GetType(request.MessageTypeName);
-
-                // If the argument types match
-                if (objType == actionParamType)
-                {
-                    // Serialize the request into the correct type
-                    var obj = _serializer.Deserialize(request.Message, objType);
-
-                    // Invoke the action and pass it the argument
-                    ActionResult actionResult = action.Invoke<object>(obj);
-
-                    // The the action result to the client
-                    SendToClientSecure(secureStream, actionResult.Data);
-                }
-                else
-                {
-                    SendToClientSecure(secureStream, "Error Invalid argument type supplied");
-                };
-            }
-        }
-
+        #endregion
 
 
         /// <summary>
@@ -340,25 +262,31 @@
         }
 
 
-        /// <summary>
-        /// Send a message to every connected client
-        /// </summary>
-        /// <typeparam name="T"> The type of the message </typeparam>
-        /// <param name="eventName"> The name of the client-side event </param>
-        /// <param name="message"> The message to send </param>
-        public void SendToAllClients<T>(string eventName, T message)
-        {
-            SendToClients(eventName, message);
-        }
+        #endregion
+
+
+
+        #region Private helpers
+
 
         /// <summary>
-        /// Send a message to every connected client
+        /// Send a message to a single client
         /// </summary>
-        /// <param name="eventName"> The name of the client-side event </param>
-        public void SendToAllClients(string eventName)
+        /// <typeparam name="T"> The type of the message </typeparam>
+        /// <param name="client"> The client to send the message to </param>
+        /// <param name="data"> The message to send to the client </param>
+        private void SendToClient<T>(TcpClient client, T data)
         {
-            SendToClients(eventName, null);
+            // The NetworkMessage which will be sent to the client
+            var networkMessage = new NetworkMessage()
+            {
+                Message = _serializer.Serialize(data),
+            };
+
+            // Send the message to the client
+            client.Client.Send(_serializer.Serialize(networkMessage));
         }
+
 
         /// <summary>
         /// Sends a message to every connected client
@@ -463,6 +391,7 @@
             });
         }
 
+
         /// <summary>
         /// Hanldes a client's request
         /// </summary>
@@ -550,6 +479,206 @@
             }
         }
 
+
+
+
+        /// <summary>
+        /// Sends a message to a single client under a secure stream
+        /// </summary>
+        /// <typeparam name="T"> The type of the message </typeparam>
+        /// <param name="secureStream"> The client's secure stream </param>
+        /// <param name="data"> The data to send to the client </param>
+        private void SendToClientSecure<T>(SslStream secureStream, T data)
+        {
+            NetworkMessage netMessage = new NetworkMessage()
+            {
+                Message = _serializer.Serialize(data),
+                MessageTypeName = typeof(T).AssemblyQualifiedName,
+            };
+
+            // Serialize the NetworkMessage
+            byte[] serializerdMessageBytes = _serializer.Serialize(netMessage);
+
+            // The size of the message *After the operation
+            int messageSize = serializerdMessageBytes.Length + 8;
+
+            // Using a memory stream to manipulate the buffers
+            using (MemoryStream memoryStream = new MemoryStream(messageSize))
+            {
+                // Get the size of the request,
+                long size = serializerdMessageBytes.Length;
+                // Turn it into a string with a 8 character padding
+                string sizePadded = size.ToString().PadRight(8);
+
+                // Write the request size into the MemoryStrem buffer
+                memoryStream.Write(Encoding.UTF8.GetBytes(sizePadded));
+
+                // Write the actuall request into the MemoryStrem buffer
+                memoryStream.Write(serializerdMessageBytes);
+
+                // Set the MemoryStream buffer in messageBytes
+                secureStream.Write(memoryStream.ToArray());
+            };
+        }
+
+
+        /// <summary>
+        /// Handles a client's request 
+        /// </summary>
+        /// <param name="request"></param>
+        /// <param name="secureStream"></param>
+        private void HandleRequestSecure(NetworkMessage request, SslStream secureStream)
+        {
+            // Get the request's controller and action names from path
+            string controllerName = request.PathSegments[0];
+            string actionName = request.PathSegments[1];
+
+            // Try to find the controller
+            _controllers.TryGetValue(controllerName, out ControllerBase controller);
+
+            // If no controller was found
+            if (controller is null)
+            {
+                SendToClientSecure(secureStream, $"Request failed. \nNo such controller: {controllerName}");
+                return;
+            };
+
+            // Try to find the action
+            var action = controller.GetAction(actionName);
+
+            // If no action was found
+            if (action is null)
+            {
+                SendToClientSecure(secureStream, $"No such action: {actionName}");
+                return;
+            };
+
+            // Request-argument validation
+            if (request.RequestHasArguments == true &&
+               action.ActionHasParameters == false)
+            {
+                SendToClientSecure(secureStream, $"Action {actionName} doesn't take a arguments");
+                return;
+            };
+
+            if (request.RequestHasArguments == false &&
+              action.ActionHasParameters == true)
+            {
+                SendToClientSecure(secureStream, $"Action {actionName} missing argument(s)");
+                return;
+            };
+
+
+            // if the request doesn't contain arguments
+            if (request.RequestHasArguments == false)
+            {
+                // Call the action
+                ActionResult actionResult = action.Invoke();
+
+                // Send the action result to the client
+                SendToClientSecure(secureStream, actionResult.Data);
+            }
+            // if the request contains arguments
+            else
+            {
+                // Get the action's paramters
+                var actionParams = action.Parameters;
+
+                // The action's parameter type
+                var actionParamType = actionParams[0].ParameterType;
+
+                // The type of the request 
+                var objType = Type.GetType(request.MessageTypeName);
+
+                // If the argument types match
+                if (objType == actionParamType)
+                {
+                    // Serialize the request into the correct type
+                    var obj = _serializer.Deserialize(request.Message, objType);
+
+                    // Invoke the action and pass it the argument
+                    ActionResult actionResult = action.Invoke<object>(obj);
+
+                    // The the action result to the client
+                    SendToClientSecure(secureStream, actionResult.Data);
+                }
+                else
+                {
+                    SendToClientSecure(secureStream, "Error Invalid argument type supplied");
+                };
+            }
+        }
+
+
+        /// <summary>
+        /// Process' a connected client
+        /// </summary>
+        /// <param name="client"> The connected client </param>
+        private void ProcessClientSecure(TcpClient client)
+        {
+            // Get the undelying secure stream
+            SslStream secureStream = new SslStream(client.GetStream());
+
+            try
+            {
+                // Authenticate the client's connection
+                secureStream.AuthenticateAsServer(_serverCertificate);
+
+                // Invoke ClientConnected event
+                ClientConnected?.Invoke(client);
+
+                // Add the client to the list
+                _connectedClientsSecure.Add((client, secureStream));
+
+
+                while (true)
+                {
+                    // Read the first 8 bytes so we know the size of the request
+                    byte[] sizeBuffer = new byte[8];
+                    int readBytes = secureStream.Read(sizeBuffer, 0, 8);
+
+                    // If we received 0 bytes meaning the client disconnected
+                    if (readBytes == 0)
+                    {
+                        HandleClientDisconnection(client);
+                        return;
+                    };
+
+                    // Get the size of the request
+                    int requestSize = GetRequestSize(sizeBuffer);
+
+                    // Read the request entirely once
+                    byte[] buffer = new byte[requestSize];
+                    readBytes = secureStream.Read(buffer);
+
+                    // Deserialize the message 
+                    var netMessage = _serializer.Deserialize<NetworkMessage>(buffer);
+
+                    // Handle the request
+                    HandleRequestSecure(netMessage, secureStream);
+                };
+            }
+            catch (AuthenticationException e)
+            {
+                Debugger.Break();
+                return;
+            }
+            catch (IOException exception)
+            {
+                // Invoke the ClientDisconnected event
+                ClientDisconnected?.Invoke(client);
+
+                // Close the connection and stream
+                client.Close();
+
+                // Remove the client from the list
+                _connectedClientsSecure.Remove((client, secureStream));
+            }
+        }
+
+
+
+
         /// <summary>
         /// Handle client disconnection
         /// </summary>
@@ -569,24 +698,22 @@
             _connectedClients.Remove(client);
         }
 
-        /// <summary>
-        /// Send a message to a single client
-        /// </summary>
-        /// <typeparam name="T"> The type of the message </typeparam>
-        /// <param name="client"> The client to send the message to </param>
-        /// <param name="data"> The message to send to the client </param>
-        private void SendToClient<T>(TcpClient client, T data)
-        {
-            // The NetworkMessage which will be sent to the client
-            var networkMessage = new NetworkMessage()
-            {
-                Message = _serializer.Serialize(data),
-            };
 
-            // Send the message to the client
-            client.Client.Send(_serializer.Serialize(networkMessage));
+        /// <summary>
+        /// Returns a request's size by reading the first 8 bytes
+        /// </summary>
+        /// <param name="buffer"></param>
+        /// <returns></returns>
+        private int GetRequestSize(byte[] buffer)
+        {
+            // Convert the buffer to a "read-able" string and convert the string to a number
+            int size = Convert.ToInt32(Encoding.UTF8.GetString(buffer));
+
+            return size;
         }
 
+
+        #endregion
 
     };
 };

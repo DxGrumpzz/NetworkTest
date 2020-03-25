@@ -20,9 +20,13 @@
 
             Console.WriteLine($"Recevied {s.Text}");
 
+            string data = Guid.NewGuid().ToString("N");
+
+            Console.WriteLine($"Will send {data}");
+             
             return new ActionResult()
             {
-                Data = "mega succ",
+                Data = data,
                 Result = ActionStatus.Success,
             };
         }

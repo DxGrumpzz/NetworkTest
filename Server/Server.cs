@@ -105,7 +105,7 @@
                 Console.ResetColor();
             };
 
-            server.InitializeServerSecure();
+            server.InitializeServerSecure(@"C:\Users\yosi1\Desktop\New folder\Cretificate.pfx", "asdf");
 
 
             while (true)

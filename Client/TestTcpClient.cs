@@ -15,11 +15,13 @@
     using System.Threading;
     using System.Threading.Tasks;
 
+
     /// <summary>
     /// A simple TCP client. Provides some extra functionality for network communication
     /// </summary>
     public class TestTcpClient
     {
+
 
         #region Private fields
 
@@ -27,6 +29,8 @@
         /// A boolean flag that indicates if the client should wait for server-received events
         /// </summary>
         private bool _handleReceivedEvents = true;
+
+
 
         /// <summary>
         /// The underlying client 
@@ -39,16 +43,23 @@
         private IPEndPoint _endPoint;
 
         /// <summary>
+        /// A stream that provides a secure way to transfer data between hosts
+        /// </summary>
+        private SslStream _secureStream;
+
+
+
+        /// <summary>
         /// The type of _serializer
         /// </summary>
         private ISerializer _serializer;
 
+        /// <summary>
+        /// The type of serializer used to serialzie/deserialize the data
+        /// </summary>
         private SerializerType _serializerType;
 
-        /// <summary>
-        /// A stream that provides a secure way to transfer data between hosts
-        /// </summary>
-        //private SslStream _secureStream;
+
 
         /// <summary>
         /// A dictionary that contains registered client side events
@@ -61,7 +72,25 @@
         private Dictionary<string, Action<object>> _receivedEventsArgs = new Dictionary<string, Action<object>>();
 
 
+
+        /// <summary>
+        /// The received response from the server, is set when the user sends some data to the server and expecting a result
+        /// </summary>
+        /// <remarks>
+        /// Why on earth is this a Func ?
+        /// I don't want to deal with reference mangling so when we return the Data to the used 
+        /// it is cleared by the GC automagikaly
+        /// </remarks>
+        private Func<NetworkMessage> _receviedResponse;
+
+        /// <summary>
+        /// A reset event used to synchornize recevied respones when client sends a request to the server expecting a result
+        /// </summary>
+        private readonly ManualResetEvent _manualResetEvent = new ManualResetEvent(false);
+
+
         #endregion
+
 
 
         /// <summary>
@@ -108,7 +137,12 @@
         }
 
 
+
         #region Public methods
+
+
+
+        #region In-secure
 
         /// <summary>
         /// Initializes a connection between the client and the server
@@ -121,41 +155,6 @@
             // Setup server-event handler
             InitializeEventHandler();
         }
-
-        SslStream _secureStream;
-
-        public void InitializeConnectionSecure(string targetAuthenticationName)
-        {
-            _client.Connect(_endPoint);
-            var networkStream = _client.GetStream();
-
-            // Create a secure connection between the client and server
-            _secureStream = new SslStream(
-                networkStream,
-                false,
-                new RemoteCertificateValidationCallback(ValidateServerCertificate),
-                null);
-
-            // Try to authenticate
-            try
-            {
-                _secureStream.AuthenticateAsClient(targetAuthenticationName);
-            }
-            catch (AuthenticationException e)
-            {
-                Debugger.Break();
-
-                networkStream.Close();
-                _client.Close();
-                _secureStream.Close();
-            }
-
-            InitializeEventHandlerSecure(_secureStream);
-        }
-
-
-        private Func<NetworkMessage> _action;
-        private readonly ManualResetEvent _manualResetEvent = new ManualResetEvent(false);
 
         /// <summary>
         /// Sends some data to the server an waits for a response
@@ -206,10 +205,63 @@
             return data;
         }
 
+        #endregion
 
 
+
+        #region Secure
+
+
+
+        /// <summary>
+        /// Initializes a secure connection using ssl
+        /// </summary>
+        /// <param name="targetAuthenticationName"> The name of the target host </param>
+        public void InitializeConnectionSecure(string targetAuthenticationName)
+        {
+            // Start the connection
+            _client.Connect(_endPoint);
+            var networkStream = _client.GetStream();
+
+            // Create a secure connection between the client and server
+            _secureStream = new SslStream(
+                networkStream,
+                false,
+                new RemoteCertificateValidationCallback(ValidateServerCertificate),
+                null);
+
+            // Try to authenticate
+            try
+            {
+                _secureStream.AuthenticateAsClient(targetAuthenticationName);
+            }
+            // If authentication failed
+            catch (AuthenticationException e)
+            {
+                Debugger.Break();
+
+                networkStream.Close();
+                _client.Close();
+                _secureStream.Close();
+            }
+
+            // If the connection and authentication process went well, 
+            // Start receving data
+            InitializeEventHandlerSecure();
+        }
+
+
+
+        /// <summary>
+        /// Sends some data to the server under a secure stream and wait for a response
+        /// </summary>
+        /// <typeparam name="T"> The type of data </typeparam>
+        /// <param name="path"> The path to call in the server </param>
+        /// <param name="obj"> The data to send </param>
+        /// <returns></returns>
         public NetworkMessage SendSecure<T>(string path, T obj = default)
         {
+            // The message that will be sent to the server
             NetworkMessage netMessage = new NetworkMessage()
             {
                 Path = path,
@@ -217,126 +269,43 @@
                 SerializerType = _serializerType,
             };
 
+            // If the user wants the message to contain arguments
             if (obj != null)
             {
+                // Serialize the data
                 netMessage.Message = _serializer.Serialize(obj);
                 netMessage.MessageTypeName = typeof(T).AssemblyQualifiedName;
             };
 
-            StringBuilder message = new StringBuilder(Encoding.UTF8.GetString(_serializer.Serialize(netMessage)));
-
-            //SslStream secureStream = GetAuthenticatedStream("LocalHost");
-
-
-            int size = message.Length;
-            string sizeAsString = size.ToString();
-            string sizePadded = sizeAsString.PadRight(8);
-
-            message.Insert(0, sizePadded);
-
-            for (int a = 0; a < sizeAsString.Length; a++)
-            {
-                message[a] = sizeAsString[a];
-            };
-
-            byte[] messageBytes = Encoding.UTF8.GetBytes(message.ToString());
-
-            NetworkMessage networkMessage = null;
 
             try
             {
+                // "Route" recieved responses so it will return the value here
                 _handleReceivedEvents = false;
+
+                // Reset the ResetEvent so we are able to wait for the request
                 _manualResetEvent.Reset();
 
-                _secureStream.Write(messageBytes);
-                _secureStream.Flush();
+                // Actually send the data
+                _secureStream.Write(GetRequestAsBytes(netMessage));
 
+                // Wait until a response is received
                 _manualResetEvent.WaitOne();
 
-                networkMessage = _action();
+                // Return the data to the user
+                return _receviedResponse();
             }
             finally
             {
                 _handleReceivedEvents = true;
-                _action = null;
+                _receviedResponse = null;
             }
-
-            return networkMessage;
         }
 
 
-        private void InitializeEventHandlerSecure(SslStream secureStream)
-        {
-            // Start a background thread
-            Task.Run(() =>
-            {
-                try
-                {
 
-                    // Continiously try and see if there's any data avaiilable
-                    while (true)
-                    {
-                        //SslStream secureStream = GetAuthenticatedStream("LocalHost");
+        #endregion
 
-                        byte[] sizeBuffer = new byte[8];
-                        int readBytes = secureStream.Read(sizeBuffer, 0, 8);
-
-                        if (readBytes == 0)
-                        {
-                            Debugger.Break();
-                            return;
-                        };
-
-                        int requestSize = GetRequestSize(sizeBuffer);
-                        byte[] buffer = new byte[requestSize];
-                        readBytes = secureStream.Read(buffer);
-
-                        // If the client sent a message to the server and is expecting a result
-                        if (_handleReceivedEvents == false)
-                        {
-                            // If we reached here, all data was read. Deserilize the data to a ServerEvent 
-                            NetworkMessage networkMessage = _serializer.Deserialize<NetworkMessage>(buffer);
-
-                            _action = () => networkMessage;
-                            _manualResetEvent.Set();
-
-                            // Don't handle *this request
-                            continue;
-                        }
-
-                        // If we reached here, all data was read. Deserilize the data to a ServerEvent 
-                        ServerEvent serverEvent = _serializer.Deserialize<ServerEvent>(buffer);
-
-                        // If the server event contains arguemnts
-                        if (serverEvent.EventHasArgs == true)
-                        {
-                            // Get the argument type from the DataTypename
-                            var argType = Type.GetType(serverEvent.DataTypename);
-
-                            // Try to find an event with the corresponding name
-                            _receivedEventsArgs.TryGetValue(serverEvent.EventName, out Action<object> action);
-
-                            // Call the event and pass it the arguments 
-                            action?.Invoke(_serializer.Deserialize(serverEvent.Data, argType));
-                        }
-                        // If no arguments present
-                        else
-                        {
-                            // Try to find the event 
-                            _receivedEvents.TryGetValue(serverEvent.EventName, out Action action);
-
-                            // And call it
-                            action?.Invoke();
-                        };
-                    };
-                }
-                catch(IOException ioException)
-                {
-                    _client.Close();
-                    _secureStream.Close();
-                }
-            });
-        }
 
 
         /// <summary>
@@ -391,14 +360,75 @@
             _client.Close();
             networkStream.Close();
 
-            _secureStream.Close();
+            _secureStream?.Close();
         }
+
 
 
         #endregion
 
 
+
         #region Private helpers
+
+
+        /// <summary>
+        /// Initializes a server response hanlder
+        /// </summary>
+        private void InitializeEventHandlerSecure()
+        {
+            // Start a background thread
+            Task.Run(() =>
+            {
+                try
+                {
+                    // Continiously try and see if there's any data avaiilable
+                    while (true)
+                    {
+                        // Read the first 8 bytes so we know the size of the request
+                        byte[] sizeBuffer = new byte[8];
+                        int readBytes = _secureStream.Read(sizeBuffer, 0, 8);
+
+
+                        if (readBytes == 0)
+                        {
+                            Debugger.Break();
+                            return;
+                        };
+
+                        // Get request size and read the request entirely without needing to call Read() multiple times
+                        int requestSize = GetRequestSize(sizeBuffer);
+                        byte[] buffer = new byte[requestSize];
+                        readBytes = _secureStream.Read(buffer);
+
+                        // If the client sent a message to the server and is expecting a result
+                        if (_handleReceivedEvents == false)
+                        {
+                            // If we reached here, all data was read. Deserilize the data to a ServerEvent 
+                            NetworkMessage networkMessage = _serializer.Deserialize<NetworkMessage>(buffer);
+
+                            _receviedResponse = () => networkMessage;
+                            _manualResetEvent.Set();
+
+                            // Don't handle *this request
+                            continue;
+                        }
+
+                        // If we reached here, all data was read. Deserilize the data to a ServerEvent 
+                        ServerEvent serverEvent = _serializer.Deserialize<ServerEvent>(buffer);
+
+                        // Handle the received server event
+                        DelegateReceivedEvent(serverEvent);
+                    };
+                }
+                catch (IOException ioException)
+                {
+                    _client.Close();
+                    _secureStream.Close();
+                }
+            });
+        }
+
 
         /// <summary>
         /// Initializes server-event hanlding
@@ -435,30 +465,11 @@
                     // If we reached here, all data was read. Deserilize the data to a ServerEvent 
                     ServerEvent serverEvent = _serializer.Deserialize<ServerEvent>(completeRequest);
 
-                    // If the server event contains arguemnts
-                    if (serverEvent.EventHasArgs == true)
-                    {
-                        // Get the argument type from the DataTypename
-                        var argType = Type.GetType(serverEvent.DataTypename);
-
-                        // Try to find an event with the corresponding name
-                        _receivedEventsArgs.TryGetValue(serverEvent.EventName, out Action<object> action);
-
-                        // Call the event and pass it the arguments 
-                        action?.Invoke(_serializer.Deserialize(serverEvent.Data, argType));
-                    }
-                    // If no arguments present
-                    else
-                    {
-                        // Try to find the event 
-                        _receivedEvents.TryGetValue(serverEvent.EventName, out Action action);
-
-                        // And call it
-                        action?.Invoke();
-                    };
+                    DelegateReceivedEvent(serverEvent);
                 };
             });
         }
+
 
         /// <summary>
         /// Waits for a message to be received
@@ -512,15 +523,31 @@
             return completeRequest.ToArray();
         }
 
-        #endregion
+
+        /// <summary>
+        /// Returns a request's size by reading the first 8 bytes
+        /// </summary>
+        /// <param name="buffer"></param>
+        /// <returns></returns>
+        private int GetRequestSize(byte[] buffer)
+        {
+            // Convert the buffer to a "read-able" string and convert the string to a number
+            int size = Convert.ToInt32(Encoding.UTF8.GetString(buffer));
+
+            return size;
+        }
 
 
-
-        private bool ValidateServerCertificate(
-              object sender,
-              X509Certificate certificate,
-              X509Chain chain,
-              SslPolicyErrors sslPolicyErrors)
+        /// <summary>
+        /// Validates a certificate, This is code taken from Microsoft: https://docs.microsoft.com/en-us/dotnet/api/system.net.security.sslstream?view=netcore-3.1#examples
+        /// I don't 100% know what is going on here. Yet
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="certificate"></param>
+        /// <param name="chain"></param>
+        /// <param name="sslPolicyErrors"></param>
+        /// <returns></returns>
+        private bool ValidateServerCertificate(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors sslPolicyErrors)
         {
             if (sslPolicyErrors == SslPolicyErrors.None)
                 return true;
@@ -529,23 +556,71 @@
         }
 
 
-
-        private static NetworkMessage GetNetMessage(int requestSize, SslStream secureStream, ISerializer serializer)
+        /// <summary>
+        /// "Converts" a <see cref="NetworkMessage"/> into a "formatted" byte[] buffer/pakcet
+        /// </summary>
+        /// <param name="request"> The request the will be sent to the server </param>
+        /// <returns></returns>
+        private byte[] GetRequestAsBytes(NetworkMessage request)
         {
-            byte[] buffer = new byte[requestSize];
-            int readBytes = secureStream.Read(buffer);
+            // Serialize the NetworkMessage
+            byte[] serializerdMessageBytes = _serializer.Serialize(request);
 
-            var receivedNetMessage = serializer.Deserialize<NetworkMessage>(buffer);
+            // The size of the message *After the operation
+            int messageSize = serializerdMessageBytes.Length + 8;
 
-            return receivedNetMessage;
+            // Using a memory stream to manipulate the buffers
+            using (MemoryStream memoryStream = new MemoryStream(messageSize))
+            {
+                // Get the size of the request,
+                long size = serializerdMessageBytes.Length;
+                // Turn it into a string with a 8 character padding
+                string sizePadded = size.ToString().PadRight(8);
+
+                // Write the request size into the MemoryStrem buffer
+                memoryStream.Write(Encoding.UTF8.GetBytes(sizePadded));
+
+                // Write the actuall request into the MemoryStrem buffer
+                memoryStream.Write(serializerdMessageBytes);
+
+                // Set the MemoryStream buffer in messageBytes
+                return memoryStream.ToArray();
+            };
         }
 
-        private static int GetRequestSize(byte[] buffer)
-        {
-            int size = Convert.ToInt32(Encoding.UTF8.GetString(buffer));
 
-            return size;
+        /// <summary>
+        /// "Delegates" a received <see cref="ServerEvent"/> to a <see cref="_receivedEvents"/> or <see cref="_receivedEventsArgs"/>
+        /// </summary>
+        /// <param name="serverEvent"></param>
+        private void DelegateReceivedEvent(ServerEvent serverEvent)
+        {
+            // If the server event contains arguemnts
+            if (serverEvent.EventHasArgs == true)
+            {
+                // Get the argument type from the DataTypename
+                var argType = Type.GetType(serverEvent.DataTypename);
+
+                // Try to find an event with the corresponding name
+                _receivedEventsArgs.TryGetValue(serverEvent.EventName, out Action<object> action);
+
+                // Call the event and pass it the arguments 
+                action?.Invoke(_serializer.Deserialize(serverEvent.Data, argType));
+            }
+            // If no arguments present
+            else
+            {
+                // Try to find the event 
+                _receivedEvents.TryGetValue(serverEvent.EventName, out Action action);
+
+                // And call it
+                action?.Invoke();
+            };
         }
+
+
+        #endregion
+
 
     };
 };

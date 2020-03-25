@@ -25,7 +25,7 @@
 
             return new ActionResult()
             {
-                Data = "mega succ",
+                Data = Guid.NewGuid().ToString("N"),
             };
         }
 
